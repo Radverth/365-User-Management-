@@ -11,13 +11,13 @@
 
 **Contents**
 
-1. [How this works](#how-this-works)
-2. [Part 1 — One-time setup](#part-1--one-time-setup)
-3. [Part 2 — Moving the guests](#part-2--moving-the-guests)
-4. [Part 3 — SharePoint access](#part-3--sharepoint-access)
-5. [Part 4 — Reading the reports](#part-4--reading-the-reports)
-6. [Part 5 — When something goes wrong](#part-5--when-something-goes-wrong)
-7. [Part 6 — Afterwards](#part-6--afterwards)
+1. How this works
+2. Part 1 — One-time setup
+3. Part 2 — Moving the guests
+4. Part 3 — SharePoint access
+5. Part 4 — Reading the reports
+6. Part 5 — When something goes wrong
+7. Part 6 — Afterwards
 
 ---
 
@@ -169,7 +169,7 @@ Independent of the guest migration — run these whenever you need them.
 
 Menu option **3**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
 
-"Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see [Reading the reports](#part-4--reading-the-reports).
+"Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see Reading the reports.
 
 > **Watch for orphaned sites.** A row marked `OrphanedGroup` means the site is connected to a Microsoft 365 group that no longer exists. Those sites have no owners at all and no group to inherit them from. Assign someone before migrating anything.
 

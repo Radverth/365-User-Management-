@@ -12,7 +12,7 @@ SharePoint/Get-SiteOwners.ps1
 |---|---|
 | **Modules** | `PnP.PowerShell` |
 | **Loads** | `Common/InputCsv.ps1`, `Common/PnPConnect.ps1` |
-| **Needs** | An Entra app registration (see [New-AppOnlyCertificate](New-AppOnlyCertificate.md) or the README) |
+| **Needs** | An Entra app registration. See `New-AppOnlyCertificate.md` for the app-only route |
 | **Supports `-WhatIf`** | No — it writes nothing to the tenant |
 
 Running it with no site selection prints the three usage forms rather than prompting.
@@ -95,7 +95,7 @@ One row per owner per source, so the same person legitimately appears more than 
 
 **`-AllSites` keeps the tenant listing.** Title, template and primary owner come from the tenant enumeration, so a site that refuses to open still yields a `TenantSiteOwner` row rather than vanishing.
 
-**Microsoft 365 group owners are read the long way round.** `Get-PnPMicrosoft365GroupOwner` returns only the object ID and leaves the name, UPN and mail blank ([pnp/powershell#5069](https://github.com/pnp/powershell/issues/5069)), so the script uses `Get-PnPMicrosoft365Group -IncludeOwners` instead. If a row still shows only a GUID, its `Note` says so — grant the app `User.Read.All`.
+**Microsoft 365 group owners are read the long way round.** `Get-PnPMicrosoft365GroupOwner` returns only the object ID and leaves the name, UPN and mail blank — a known bug in the cmdlet — so the script uses `Get-PnPMicrosoft365Group -IncludeOwners` instead. If a row still shows only a GUID, its `Note` says so — grant the app `User.Read.All`.
 
 **Noise is removed by default and counted.** `SHAREPOINT\system` is never a person, and the tenant-wide Global Administrator / SharePoint Administrator role claims appear identically on most sites. `-IncludeSystemPrincipals` keeps them. Duplicate rows for the same owner on the same site are collapsed.
 

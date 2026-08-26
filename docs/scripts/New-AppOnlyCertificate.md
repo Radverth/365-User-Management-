@@ -14,7 +14,7 @@ Setup/New-AppOnlyCertificate.ps1
 | **Loads** | Nothing — fully standalone, so it can be copied out of the folder |
 | **Supports `-WhatIf`** | No |
 
-Uses .NET's certificate API directly rather than `New-SelfSignedCertificate` (Windows only) or `New-PnPAzureCertificate` (fails on some PowerShell 7.4 builds — [pnp/powershell#3838](https://github.com/pnp/powershell/discussions/3838)), so it behaves the same on Windows, Linux and macOS.
+Uses .NET's certificate API directly rather than `New-SelfSignedCertificate` (Windows only) or `New-PnPAzureCertificate` (which fails on some PowerShell 7.4 builds), so it behaves the same on Windows, Linux and macOS.
 
 ---
 

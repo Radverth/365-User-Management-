@@ -4,14 +4,16 @@ Documentation for running each script directly, with parameters, rather than thr
 
 The menu is a convenience. Everything it does, these scripts do — it only asks questions and passes the answers along. Use these when you want to script a run, schedule one, or pass options the menu doesn't expose.
 
+Each has its own page in this folder, named after the script.
+
 | Script | Purpose | Changes anything? |
 |---|---|---|
-| [Export-GuestPermissions](Export-GuestPermissions.md) | Guests and their group memberships → CSV | No |
-| [Import-GuestPermissions](Import-GuestPermissions.md) | Recreate those guests in another tenant | **Yes** |
-| [Get-SiteOwners](Get-SiteOwners.md) | SharePoint site owners → CSV | No |
-| [Set-SiteMembersToViewers](Set-SiteMembersToViewers.md) | Demote site members to read-only | **Yes** |
-| [New-AppOnlyCertificate](New-AppOnlyCertificate.md) | Certificate for app-only sign-in | Local files only |
-| [Get-M365UserPermissionsReport](Get-M365UserPermissionsReport.md) | All users and their groups → CSV | No |
+| `Guests/Export-GuestPermissions.ps1` | Guests and their group memberships → CSV | No |
+| `Guests/Import-GuestPermissions.ps1` | Recreate those guests in another tenant | **Yes** |
+| `SharePoint/Get-SiteOwners.ps1` | SharePoint site owners → CSV | No |
+| `SharePoint/Set-SiteMembersToViewers.ps1` | Demote site members to read-only | **Yes** |
+| `Setup/New-AppOnlyCertificate.ps1` | Certificate for app-only sign-in | Local files only |
+| `Reports/Get-M365UserPermissionsReport.ps1` | All users and their groups → CSV | No |
 
 ---
 

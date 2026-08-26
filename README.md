@@ -9,7 +9,7 @@ Every script writes its results to CSV and the ones that change anything support
 ## Start here
 
 **New to this, or handing it to someone who is?** Read the
-[user guide](docs/USER-GUIDE.md) — a step-by-step runbook written for
+user guide — a step-by-step runbook written for
 administrators who know Microsoft 365 but not PowerShell. It assumes the toolkit
 folder was handed to them, so it is safe to pass on as-is.
 
@@ -33,16 +33,16 @@ run directly.
 
 | Script | Tenant | Changes anything? |
 |---|---|---|
-| [`Start-MigrationToolkit.ps1`](Start-MigrationToolkit.ps1) | Either | Only via the task you choose |
-| [`Guests/Export-GuestPermissions.ps1`](Guests/Export-GuestPermissions.ps1) | A (source) | No |
-| [`Guests/Import-GuestPermissions.ps1`](Guests/Import-GuestPermissions.ps1) | B (target) | Yes |
-| [`SharePoint/Set-SiteMembersToViewers.ps1`](SharePoint/Set-SiteMembersToViewers.ps1) | Either | Yes |
-| [`SharePoint/Get-SiteOwners.ps1`](SharePoint/Get-SiteOwners.ps1) | Either | No |
-| [`Reports/Get-M365UserPermissionsReport.ps1`](Reports/Get-M365UserPermissionsReport.ps1) | Either | No |
-| [`Setup/New-AppOnlyCertificate.ps1`](Setup/New-AppOnlyCertificate.ps1) | — | Local files only |
+| `Start-MigrationToolkit.ps1` | Either | Only via the task you choose |
+| `Guests/Export-GuestPermissions.ps1` | A (source) | No |
+| `Guests/Import-GuestPermissions.ps1` | B (target) | Yes |
+| `SharePoint/Set-SiteMembersToViewers.ps1` | Either | Yes |
+| `SharePoint/Get-SiteOwners.ps1` | Either | No |
+| `Reports/Get-M365UserPermissionsReport.ps1` | Either | No |
+| `Setup/New-AppOnlyCertificate.ps1` | — | Local files only |
 
 Per-script reference documentation — parameters, examples, output columns and
-behaviour — is in [docs/scripts/](docs/scripts/README.md), for running the scripts
+behaviour — is in docs/scripts/, for running the scripts
 directly rather than through the menu.
 
 `Common/` holds shared helpers the other scripts dot-source (`InputCsv.ps1` for CSV
@@ -75,8 +75,8 @@ submodules, if you would rather have the lot.
 
 All scripts sign in interactively and support MFA. The two SharePoint scripts also
 accept certificate-based app-only sign-in, which is the only way to reach every site
-in a tenant — see [App-only access to every
-site](#app-only-access-to-every-site-optional).
+in a tenant — see App-only access to every
+site.
 
 ### Entra app registration for PnP.PowerShell
 
@@ -137,7 +137,7 @@ Register-PnPEntraIDApp `
 ```
 
 If you already have the app and only need a new certificate, skip this and see
-[Creating or rotating the certificate](#creating-or-rotating-the-certificate) —
+Creating or rotating the certificate —
 re-running the registration creates a second app registration rather than updating
 the first.
 
@@ -176,7 +176,7 @@ store so `-Thumbprint` works.
 
 It uses .NET's certificate API directly rather than `New-SelfSignedCertificate`
 (Windows only) or `New-PnPAzureCertificate` (which fails on some PowerShell 7.4
-builds — [pnp/powershell#3838](https://github.com/pnp/powershell/discussions/3838)),
+builds),
 so it behaves the same everywhere.
 
 Then upload the `.cer`: **Entra portal → App registrations → your app →
@@ -539,7 +539,7 @@ A byte-order mark on the first column name is stripped automatically.
 ### "A parameter cannot be found that matches parameter name 'Interactive'"
 
 `Register-PnPEntraIDAppForInteractiveLogin` has no `-Interactive` switch — see
-[Entra app registration](#entra-app-registration-for-pnppowershell) above. Drop it.
+Entra app registration above. Drop it.
 Use `-DeviceLogin` if you need the device code flow.
 
 ### Being asked to sign in at every site
@@ -552,7 +552,7 @@ Update-Module PnP.PowerShell
 ```
 
 The scripts warn at startup when the installed version lacks it. See
-[Signing in once instead of once per site](#signing-in-once-instead-of-once-per-site).
+Signing in once instead of once per site.
 
 ### Owner report rows say "Attempted to perform an unauthorized operation"
 
@@ -569,7 +569,7 @@ still work, so those sites are not blank:
 Two ways to get the SharePoint group detail as well:
 
 - **App-only sign-in** — see
-  [App-only access to every site](#app-only-access-to-every-site-optional). The app
+  App-only access to every site. The app
   authenticates as itself with `Sites.FullControl.All` and reaches every site.
 - **Make yourself a site collection administrator** on the sites you care about
   (SharePoint admin centre, or `Set-PnPTenantSite -Owners`) and re-run.
@@ -581,13 +581,13 @@ through the Windows certificate store. Current versions resolve it through .NET 
 Linux and macOS instead, so update to a current copy of the toolkit. If the
 certificate simply is not
 installed on the machine, use `-CertificatePath` with the `.pfx` — see
-[Windows, Linux and macOS](#windows-linux-and-macos).
+Windows, Linux and macOS.
 
 ### Owner names are blank on Microsoft 365 group rows
 
 Fixed in the script. `Get-PnPMicrosoft365GroupOwner` returns only the directory
 object ID and leaves `DisplayName`, `UserPrincipalName` and `Mail` empty
-([pnp/powershell#5069](https://github.com/pnp/powershell/issues/5069)), so the
+— a known bug in that cmdlet — so the
 script uses `Get-PnPMicrosoft365Group -IncludeOwners` instead. If a row still shows
 only a GUID, its `Note` says so — grant the app `User.Read.All`.
 
