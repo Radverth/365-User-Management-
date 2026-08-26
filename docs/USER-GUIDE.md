@@ -286,4 +286,11 @@ You ran a script directly without telling it which sites to work on. Use the men
 
 ---
 
+**Running the scripts directly.** The menu is a convenience, not a requirement. If
+you would rather call the scripts with parameters — to script a run, schedule one,
+or use an option the menu doesn't expose — see the per-script reference in
+`docs/scripts/`.
+
+---
+
 *Every task writes a CSV, and every task that changes your tenant rehearses first. If you're ever unsure what something will do, run it and read the preview — that's what it's for.*

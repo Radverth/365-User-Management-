@@ -41,6 +41,10 @@ run directly.
 | [`Reports/Get-M365UserPermissionsReport.ps1`](Reports/Get-M365UserPermissionsReport.ps1) | Either | No |
 | [`Setup/New-AppOnlyCertificate.ps1`](Setup/New-AppOnlyCertificate.ps1) | — | Local files only |
 
+Per-script reference documentation — parameters, examples, output columns and
+behaviour — is in [docs/scripts/](docs/scripts/README.md), for running the scripts
+directly rather than through the menu.
+
 `Common/` holds shared helpers the other scripts dot-source (`InputCsv.ps1` for CSV
 input, `PnPConnect.ps1` for SharePoint sign-in). Keep the folder structure intact —
 running a script from outside the complete folder will fail with a message telling
