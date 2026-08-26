@@ -30,6 +30,12 @@
     Report on every site in the tenant. Requires -TenantAdminUrl and SharePoint
     administrator rights.
 
+    Each site is opened individually to read its groups, so allow time on a large
+    tenant. Being SharePoint Administrator does not make you a site collection
+    administrator everywhere; sites that refuse to open still produce a row with
+    the primary owner from the tenant listing, marked with an Error row explaining
+    that group-level owners are missing.
+
 .PARAMETER TenantAdminUrl
     Your tenant admin URL, e.g. https://contoso-admin.sharepoint.com. Required with
     -AllSites.
@@ -67,7 +73,7 @@
 
 [CmdletBinding(DefaultParameterSetName = 'Urls')]
 param(
-    [Parameter(Mandatory, ParameterSetName = 'Urls')]
+    [Parameter(ParameterSetName = 'Urls')]
     [string[]]$SiteUrl,
 
     [Parameter(Mandatory, ParameterSetName = 'Csv')]
@@ -139,6 +145,10 @@ Initialize-OutputPath -Path $OutputPath
 # Resolve the list of sites.
 $sites = @()
 
+# Url (lowercased, no trailing slash) -> the Get-PnPTenantSite record, when -AllSites
+# was used. Empty in the other modes.
+$tenantSiteIndex = @{}
+
 switch ($PSCmdlet.ParameterSetName) {
 
     'Csv' {
@@ -162,6 +172,16 @@ switch ($PSCmdlet.ParameterSetName) {
             $tenantSites = @($tenantSites | Where-Object { $_.Template -notlike 'SPSPERS*' })
         }
 
+        # The tenant listing already knows each site's title, template and primary
+        # owner. Keep it: being SharePoint Administrator does not make you a site
+        # collection admin everywhere, so some of these sites will refuse a direct
+        # connection, and this is what lets those still produce an owner row.
+        foreach ($tenantSite in $tenantSites) {
+            if ($tenantSite.Url) {
+                $tenantSiteIndex[$tenantSite.Url.TrimEnd('/').ToLowerInvariant()] = $tenantSite
+            }
+        }
+
         $sites = @($tenantSites | Select-Object -ExpandProperty Url)
 
         Write-Host "  $($sites.Count) site(s) found." -ForegroundColor Green
@@ -172,7 +192,23 @@ switch ($PSCmdlet.ParameterSetName) {
     }
 }
 
-if ($sites.Count -eq 0) { throw 'No site URLs to process.' }
+if ($sites.Count -eq 0) {
+
+    $usage = [System.Text.StringBuilder]::new()
+
+    [void]$usage.AppendLine('No sites to process. Choose one of the three modes:')
+    [void]$usage.AppendLine('')
+    [void]$usage.AppendLine('  Every site in the tenant:')
+    [void]$usage.AppendLine('    .\Get-SiteOwners.ps1 -AllSites -TenantAdminUrl https://<tenant>-admin.sharepoint.com -ClientId <id>')
+    [void]$usage.AppendLine('')
+    [void]$usage.AppendLine('  Specific sites:')
+    [void]$usage.AppendLine('    .\Get-SiteOwners.ps1 -SiteUrl https://<tenant>.sharepoint.com/sites/One,https://<tenant>.sharepoint.com/sites/Two -ClientId <id>')
+    [void]$usage.AppendLine('')
+    [void]$usage.AppendLine('  From a CSV with a SiteUrl column:')
+    [void]$usage.AppendLine('    .\Get-SiteOwners.ps1 -SitesCsvPath .\sites.csv -ClientId <id>')
+
+    throw $usage.ToString()
+}
 
 Write-Host "Reporting owners for $($sites.Count) site(s)..." -ForegroundColor Cyan
 Write-Host ''
@@ -219,18 +255,48 @@ foreach ($site in $sites) {
                    -Status "$counter of $($sites.Count) - $site" `
                    -PercentComplete (($counter / $sites.Count) * 100)
 
+    # Whatever the tenant listing already told us about this site.
+    $tenantRecord = $tenantSiteIndex[$site.TrimEnd('/').ToLowerInvariant()]
+
+    $siteTitle = if ($tenantRecord) { [string]$tenantRecord.Title } else { '' }
+    $template  = if ($tenantRecord) { [string]$tenantRecord.Template } else { '' }
+    $groupId   = $null
+
+    if ($tenantRecord -and $tenantRecord.GroupId -and $tenantRecord.GroupId -ne [Guid]::Empty) {
+        $groupId = $tenantRecord.GroupId
+    }
+
+    $ownersFound = 0
+
+    # The primary owner recorded against the site collection itself. Available
+    # without opening the site, so it survives a failed connection below.
+    if ($tenantRecord -and $tenantRecord.Owner) {
+
+        $ownerLogin = [string]$tenantRecord.Owner
+
+        Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
+                     -GroupConnected ([bool]$groupId) -Source 'TenantSiteOwner' `
+                     -OwnerName $tenantRecord.OwnerName -OwnerLogin $ownerLogin `
+                     -OwnerEmail $tenantRecord.OwnerEmail -PrincipalType 'User' `
+                     -IsGuest ($ownerLogin -imatch '(#ext#|urn:spo:guest)') `
+                     -Note 'Primary owner from the tenant site listing'
+
+        $ownersFound++
+    }
+
     try {
         Connect-Site -Url $site -AppId $ClientId
     }
     catch {
-        Write-Warning "Could not connect to $site : $($_.Exception.Message)"
-        Add-OwnerRow -Site $site -Source 'Error' -Note "Connect failed: $($_.Exception.Message)"
+        # Being SharePoint Administrator does not grant access to every site, so
+        # this is expected on some. Any tenant-listing owner above still stands.
+        Write-Warning "Could not open $site : $($_.Exception.Message)"
+
+        Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
+                     -GroupConnected ([bool]$groupId) -Source 'Error' `
+                     -Note "Could not open the site, so group-level owners are missing: $($_.Exception.Message)"
         continue
     }
-
-    $siteTitle = ''
-    $template  = ''
-    $groupId   = $null
 
     try {
         $web = Get-PnPWeb -ErrorAction Stop
@@ -252,7 +318,6 @@ foreach ($site in $sites) {
     }
 
     $isGroupConnected = [bool]$groupId
-    $ownersFound = 0
 
     # --- site collection administrators -------------------------------------
 

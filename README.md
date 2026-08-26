@@ -237,10 +237,21 @@ you can review it separately.
 Read-only.
 
 ```powershell
+# Every site in the tenant - the usual starting point
+.\Get-SiteOwners.ps1 -AllSites -TenantAdminUrl https://contoso-admin.sharepoint.com -ClientId $id
+
+# Specific sites
 .\Get-SiteOwners.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Project -ClientId $id
 
-.\Get-SiteOwners.ps1 -AllSites -TenantAdminUrl https://contoso-admin.sharepoint.com -ClientId $id
+# From a CSV with a SiteUrl column
+.\Get-SiteOwners.ps1 -SitesCsvPath .\sites.csv -ClientId $id
 ```
+
+Your tenant admin URL is your SharePoint host with `-admin` inserted:
+`https://contoso.sharepoint.com` becomes `https://contoso-admin.sharepoint.com`.
+
+Running the script with no arguments prints these three forms rather than doing
+anything.
 
 "Owner" means three different things in SharePoint, and all three are collected —
 each owner is one row tagged with its `OwnerSource`:
@@ -250,6 +261,7 @@ each owner is one row tagged with its `OwnerSource`:
 | `SiteCollectionAdmin` | Full control of the site collection. The real administrators, and the ones most often missed. |
 | `OwnersGroup` | Members of the site's associated Owners SharePoint group. |
 | `Microsoft365GroupOwner` | Owners of the connected Microsoft 365 group. These are site owners even when the Owners group looks empty. |
+| `TenantSiteOwner` | The site collection's primary owner from the tenant listing. `-AllSites` only. |
 
 Guest owners are flagged in the `IsGuest` column and counted in the summary. Each
 source can be turned off with `-IncludeSiteCollectionAdmins:$false`,
@@ -257,6 +269,19 @@ source can be turned off with `-IncludeSiteCollectionAdmins:$false`,
 
 With `-AllSites`, OneDrive personal sites are excluded unless you add
 `-IncludeOneDrive`.
+
+`-AllSites` opens each site individually to read its groups, so allow time on a
+large tenant. Two things follow from that:
+
+- A fourth source, `TenantSiteOwner`, appears — the primary owner recorded against
+  the site collection, taken from the tenant listing rather than from inside the
+  site.
+- Being SharePoint Administrator does **not** make you a site collection
+  administrator everywhere. Sites that refuse to open still get their
+  `TenantSiteOwner` row, alongside an `Error` row saying group-level owners are
+  missing for that site. Nothing is silently dropped — filter the CSV on
+  `OwnerSource = Error` to see which sites need you to grant yourself access and
+  re-run.
 
 ---
 
