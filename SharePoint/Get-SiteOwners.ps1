@@ -61,6 +61,10 @@
 .PARAMETER Delimiter
     Field separator of -SitesCsvPath. Detected automatically when omitted.
 
+.PARAMETER NoPersistedLogin
+    Sign in afresh for every site instead of reusing a cached token. Only needed
+    when you must connect as different accounts, or to work around a stale token.
+
 .EXAMPLE
     .\Get-SiteOwners.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Project -ClientId $id
 
@@ -98,7 +102,9 @@ param(
 
     [string]$OutputPath = ".\SharePoint_SiteOwners.csv",
 
-    [string]$Delimiter
+    [string]$Delimiter,
+
+    [switch]$NoPersistedLogin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,20 +121,6 @@ function Initialize-OutputPath {
     }
 }
 
-function Connect-Site {
-    param([Parameter(Mandatory)][string]$Url, [string]$AppId)
-
-    $params = @{
-        Url         = $Url
-        Interactive = $true
-        ErrorAction = 'Stop'
-    }
-
-    if ($AppId) { $params['ClientId'] = $AppId }
-
-    Connect-PnPOnline @params
-}
-
 # Shared CSV input handling - see Common/InputCsv.ps1
 $commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
 
@@ -137,6 +129,14 @@ if (-not (Test-Path -Path $commonPath)) {
 }
 
 . $commonPath
+
+$pnpConnectPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\PnPConnect.ps1'
+
+if (-not (Test-Path -Path $pnpConnectPath)) {
+    throw "Could not find $pnpConnectPath. Run this script from inside a full clone of the repository - it depends on the shared helpers in Common/."
+}
+
+. $pnpConnectPath
 
 #endregion Helpers ------------------------------------------------------------
 
@@ -164,7 +164,7 @@ switch ($PSCmdlet.ParameterSetName) {
     'All' {
         Write-Host "Connecting to $TenantAdminUrl to enumerate sites..." -ForegroundColor Cyan
 
-        Connect-Site -Url $TenantAdminUrl -AppId $ClientId
+        Connect-ScriptSite -Url $TenantAdminUrl -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
 
         $tenantSites = @(Get-PnPTenantSite -ErrorAction Stop)
 
@@ -211,6 +211,7 @@ if ($sites.Count -eq 0) {
 }
 
 Write-Host "Reporting owners for $($sites.Count) site(s)..." -ForegroundColor Cyan
+Write-PnPLoginAdvice -NoPersistedLogin:$NoPersistedLogin
 Write-Host ''
 
 $report = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -285,7 +286,7 @@ foreach ($site in $sites) {
     }
 
     try {
-        Connect-Site -Url $site -AppId $ClientId
+        Connect-ScriptSite -Url $site -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
     }
     catch {
         # Being SharePoint Administrator does not grant access to every site, so
@@ -410,8 +411,12 @@ foreach ($site in $sites) {
 
     Write-Host ("[{0}/{1}] {2} - {3} owner(s)" -f $counter, $sites.Count, $site, $ownersFound) -ForegroundColor DarkGray
 
-    try { Disconnect-PnPOnline -ErrorAction SilentlyContinue } catch { }
 }
+
+# One disconnect at the end. Doing it per site drops the token context and makes
+# the next Connect prompt again. The persisted cache is left intact - clear it
+# with Disconnect-PnPOnline -ClearPersistedLogin.
+try { Disconnect-PnPOnline -ErrorAction SilentlyContinue } catch { }
 
 Write-Progress -Activity 'Collecting site owners' -Completed
 

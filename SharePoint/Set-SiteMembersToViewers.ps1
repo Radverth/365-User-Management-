@@ -62,6 +62,10 @@
 .PARAMETER Delimiter
     Field separator of -SitesCsvPath. Detected automatically when omitted.
 
+.PARAMETER NoPersistedLogin
+    Sign in afresh for every site instead of reusing a cached token. Only needed
+    when you must connect as different accounts, or to work around a stale token.
+
 .EXAMPLE
     .\Set-SiteMembersToViewers.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Project -ClientId $id -WhatIf
 
@@ -100,7 +104,9 @@ param(
 
     [string]$OutputPath = ".\SharePoint_MembersToViewers_Log.csv",
 
-    [string]$Delimiter
+    [string]$Delimiter,
+
+    [switch]$NoPersistedLogin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,6 +139,14 @@ if (-not (Test-Path -Path $commonPath)) {
 }
 
 . $commonPath
+
+$pnpConnectPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\PnPConnect.ps1'
+
+if (-not (Test-Path -Path $pnpConnectPath)) {
+    throw "Could not find $pnpConnectPath. Run this script from inside a full clone of the repository - it depends on the shared helpers in Common/."
+}
+
+. $pnpConnectPath
 
 #endregion Helpers ------------------------------------------------------------
 
@@ -170,6 +184,7 @@ if (-not $RemoveFromMembers) {
 }
 
 Write-Host "Sites to process: $($sites.Count)" -ForegroundColor Cyan
+Write-PnPLoginAdvice -NoPersistedLogin:$NoPersistedLogin
 Write-Host ''
 
 $log = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -214,15 +229,7 @@ foreach ($site in $sites) {
     # --- connect ------------------------------------------------------------
 
     try {
-        $connectParams = @{
-            Url         = $site
-            Interactive = $true
-            ErrorAction = 'Stop'
-        }
-
-        if ($ClientId) { $connectParams['ClientId'] = $ClientId }
-
-        Connect-PnPOnline @connectParams
+        Connect-ScriptSite -Url $site -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
     }
     catch {
         Write-Warning "  Could not connect: $($_.Exception.Message)"
@@ -405,8 +412,12 @@ foreach ($site in $sites) {
 
     Write-Host "  Demoted: $moved   Left alone: $skipped" -ForegroundColor Green
 
-    try { Disconnect-PnPOnline -ErrorAction SilentlyContinue } catch { }
 }
+
+# One disconnect at the end. Doing it per site drops the token context and makes
+# the next Connect prompt again. The persisted cache is left intact - clear it
+# with Disconnect-PnPOnline -ClearPersistedLogin.
+try { Disconnect-PnPOnline -ErrorAction SilentlyContinue } catch { }
 
 Write-Progress -Activity 'Demoting site members' -Completed
 

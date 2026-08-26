@@ -14,9 +14,9 @@ Every script writes its results to CSV and the ones that change anything support
 | [`SharePoint/Get-SiteOwners.ps1`](SharePoint/Get-SiteOwners.ps1) | Either | No |
 | [`Reports/Get-M365UserPermissionsReport.ps1`](Reports/Get-M365UserPermissionsReport.ps1) | Either | No |
 
-`Common/InputCsv.ps1` is a shared helper the other scripts dot-source. Keep the
-folder structure intact — running a script from outside a full clone will fail with
-a message telling you so.
+`Common/` holds shared helpers the other scripts dot-source (`InputCsv.ps1` for CSV
+input, `PnPConnect.ps1` for SharePoint sign-in). Keep the folder structure intact —
+running a script from outside a full clone will fail with a message telling you so.
 
 ---
 
@@ -213,6 +213,7 @@ cd SharePoint
 | `-ExcludeLogin` | empty | Login names or emails to leave alone. Protects service accounts. |
 | `-RemoveFromMembers` | `$true` | Set `-RemoveFromMembers:$false` to copy into Visitors without removing from Members. |
 | `-GuestLoginPattern` | `(#ext#\|urn:spo:guest)` | Regex identifying a guest by login name. |
+| `-NoPersistedLogin` | off | Sign in afresh at every site instead of reusing the cached token. |
 
 Users are added to Visitors **before** being removed from Members, so an
 interrupted run never leaves anyone with no access. If the add to Visitors fails,
@@ -231,6 +232,30 @@ someone from the group also strips their Teams chat, group mailbox and calendar
 access. Group-connected sites are still processed for anyone held directly in the
 SharePoint Members group, and an `Info` row in the log flags the connected group so
 you can review it separately.
+
+### Signing in once instead of once per site
+
+Both SharePoint scripts connect to each site collection in turn. They pass
+`-PersistLogin` to `Connect-PnPOnline`, which caches the delegated token under
+`%LOCALAPPDATA%\.m365pnppowershell` (`$HOME/.m365pnppowershell` on Linux and macOS),
+encrypted with DPAPI on Windows and the Keychain elsewhere. You sign in at the
+first site and the rest reuse the token — including in a later PowerShell session,
+and after a reboot.
+
+`-PersistLogin` only exists in newer PnP.PowerShell releases. On an older module the
+scripts warn once at the start and every site will prompt; `Update-Module
+PnP.PowerShell` fixes that.
+
+They also disconnect only once, at the end of the run. Calling
+`Disconnect-PnPOnline` between sites drops the token context and makes the next
+connection prompt again.
+
+To force a fresh sign-in per site — connecting as different accounts, or clearing a
+stale token — pass `-NoPersistedLogin`. To forget the cached token entirely:
+
+```powershell
+Disconnect-PnPOnline -ClearPersistedLogin
+```
 
 ### Report site owners
 
@@ -316,6 +341,18 @@ A byte-order mark on the first column name is stripped automatically.
 `Register-PnPEntraIDAppForInteractiveLogin` has no `-Interactive` switch — see
 [Entra app registration](#entra-app-registration-for-pnppowershell) above. Drop it.
 Use `-DeviceLogin` if you need the device code flow.
+
+### Being asked to sign in at every site
+
+Update PnP.PowerShell — the token caching the scripts rely on needs a version that
+has `-PersistLogin`:
+
+```powershell
+Update-Module PnP.PowerShell
+```
+
+The scripts warn at startup when the installed version lacks it. See
+[Signing in once instead of once per site](#signing-in-once-instead-of-once-per-site).
 
 ### The export returned fewer guests than expected
 
