@@ -86,14 +86,29 @@ function Import-InputCsv {
 
     Assert-TextCsv -Path $Path
 
+    # Kept for diagnostics: a file whose records all sit on one line cannot be a
+    # delimiter problem, and saying so beats guessing.
+    $raw     = [System.IO.File]::ReadAllText($Path)
+    $hasBreak = $raw -match "[`r`n]"
+
     $candidates = if ($Delimiter) { @($Delimiter) } else { @(',', ';', "`t", '|') }
 
-    $best = $null
+    $best        = $null
+    $parseErrors = @{}
 
     foreach ($candidate in $candidates) {
 
-        try   { $rows = @(Import-Csv -Path $Path -Delimiter $candidate -ErrorAction Stop) }
-        catch { continue }
+        try {
+            $rows = @(Import-Csv -Path $Path -Delimiter $candidate -ErrorAction Stop)
+        }
+        catch {
+            # Do NOT discard this. Import-Csv throws "The member ... is already
+            # present" when the header carries a repeated name, which is what a
+            # file with its records run together looks like. Swallowing it and
+            # moving to the next delimiter reports a wrong cause with confidence.
+            $parseErrors[$candidate] = $_.Exception.Message
+            continue
+        }
 
         if ($rows.Count -eq 0) { continue }
 
@@ -118,8 +133,43 @@ function Import-InputCsv {
         if ($RequiredColumns.Count -gt 0 -and $matched -eq $RequiredColumns.Count) { break }
     }
 
-    if ($null -eq $best) {
-        throw "Could not read any rows from '$Path'. The file is empty, or contains only a header."
+    # A single column means nothing was really split, so this is not a usable
+    # parse - report the underlying cause rather than the delimiter that "won".
+    $usable = $best -and ($best.Trimmed.Count -gt 1 -or $best.Matched -gt 0)
+
+    if (-not $usable) {
+
+        $message = [System.Text.StringBuilder]::new()
+
+        [void]$message.AppendLine("Could not read '$Path' as a CSV.")
+        [void]$message.AppendLine('')
+
+        if (-not $hasBreak) {
+            [void]$message.AppendLine('  The file contains no line breaks at all, so the header and every record')
+            [void]$message.AppendLine('  are run together on a single line. Nothing can be read from it.')
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  This usually means the file was converted or copied by something that')
+            [void]$message.AppendLine('  stripped the line endings. Re-run the export to produce a fresh file,')
+            [void]$message.AppendLine('  and copy it as a file rather than pasting its contents.')
+        }
+        elseif ($parseErrors.Count -gt 0) {
+
+            foreach ($key in $parseErrors.Keys) {
+                $shown = if ($key -eq "`t") { 'tab' } else { "'$key'" }
+                [void]$message.AppendLine("  Reading it with $shown as the separator failed: $($parseErrors[$key])")
+            }
+
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  "The member ... is already present" means the header has the same column')
+            [void]$message.AppendLine('  name twice, which happens when records have been run together onto one')
+            [void]$message.AppendLine('  line. Re-run the export to produce a fresh file.')
+        }
+        else {
+            [void]$message.AppendLine('  No separator produced more than a single column.')
+            [void]$message.AppendLine('  Re-run the export, or pass the separator explicitly with -Delimiter.')
+        }
+
+        throw $message.ToString()
     }
 
     if ($best.Delimiter -ne ',' -and -not $Delimiter) {

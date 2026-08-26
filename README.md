@@ -514,6 +514,11 @@ parses as a single column. The scripts try `,` `;` tab and `|` automatically and
 report which one they used, so this now loads on its own. Force one with
 `-Delimiter ";"` if detection picks wrong.
 
+**The records are run together on one line.** If the error says the file contains
+no line breaks, the file has been through something that stripped its line endings
+— a conversion, or copy-and-paste of the contents rather than the file itself.
+Nothing can be recovered from it; re-run the export and move the file as a file.
+
 **It is the wrong file.** The `Found:` line in the error lists the real columns.
 `DisplayName, UserPrincipalName, Email, ...` means you passed the output of
 `Reports/Get-M365UserPermissionsReport.ps1` rather than
