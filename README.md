@@ -8,6 +8,11 @@ Every script writes its results to CSV and the ones that change anything support
 
 ## Start here
 
+**New to this, or handing it to someone who is?** Read the
+[user guide](docs/user-guide.html) — a step-by-step runbook written for
+administrators who know Microsoft 365 but not PowerShell. Open it in a browser,
+or view the published copy your team was sent.
+
 If you would rather answer questions than remember parameters:
 
 ```powershell

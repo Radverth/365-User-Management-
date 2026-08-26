@@ -1,0 +1,669 @@
+<title>Tenant Migration Runbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --ground:      #F5F6F4;
+  --surface:     #FFFFFF;
+  --surface-alt: #ECEEEA;
+  --ink:         #1A1F1E;
+  --ink-soft:    #414A47;
+  --muted:       #5F6A66;
+  --rule:        #DBDFDA;
+  --rule-strong: #C3C9C3;
+  --accent:      #1F5D5A;
+  --accent-soft: #E2EDEB;
+  --warn:        #A6641B;
+  --warn-soft:   #F6EADB;
+  --alert:       #93362B;
+  --alert-soft:  #F7E5E2;
+  --code-bg:     #1B2221;
+  --code-ink:    #DCE4E1;
+  --code-dim:    #8FA09B;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #101413;
+    --surface:     #171D1C;
+    --surface-alt: #1E2624;
+    --ink:         #E7EBE8;
+    --ink-soft:    #C3CBC7;
+    --muted:       #93A09B;
+    --rule:        #29322F;
+    --rule-strong: #3A4541;
+    --accent:      #6FBDB5;
+    --accent-soft: #17302E;
+    --warn:        #DCA463;
+    --warn-soft:   #2E2417;
+    --alert:       #DE8E82;
+    --alert-soft:  #331E1B;
+    --code-bg:     #0B0F0E;
+    --code-ink:    #DCE4E1;
+    --code-dim:    #7F908B;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #101413;
+  --surface:     #171D1C;
+  --surface-alt: #1E2624;
+  --ink:         #E7EBE8;
+  --ink-soft:    #C3CBC7;
+  --muted:       #93A09B;
+  --rule:        #29322F;
+  --rule-strong: #3A4541;
+  --accent:      #6FBDB5;
+  --accent-soft: #17302E;
+  --warn:        #DCA463;
+  --warn-soft:   #2E2417;
+  --alert:       #DE8E82;
+  --alert-soft:  #331E1B;
+  --code-bg:     #0B0F0E;
+  --code-ink:    #DCE4E1;
+  --code-dim:    #7F908B;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Source Serif 4", Georgia, serif;
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3.5rem;
+}
+
+h1, h2, h3, h4 {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  text-wrap: balance;
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+}
+
+h1 { font-size: clamp(2.1rem, 5vw, 3rem); font-weight: 700; }
+h2 { font-size: clamp(1.5rem, 3vw, 1.9rem); font-weight: 600; }
+h3 { font-size: 1.18rem; font-weight: 600; }
+h4 { font-size: 1rem; font-weight: 600; }
+
+p { margin: 0; max-width: 66ch; }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+code, kbd, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+code {
+  font-size: 0.86em;
+  background: var(--surface-alt);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.1em 0.34em;
+}
+
+pre {
+  margin: 0;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border-radius: 6px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-size: 0.83rem;
+  line-height: 1.65;
+  border: 1px solid var(--rule-strong);
+}
+pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+pre .c { color: var(--code-dim); }
+
+/* ---- masthead ---- */
+.masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding-bottom: 2.25rem;
+  border-bottom: 2px solid var(--ink);
+}
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.standfirst { font-size: 1.16rem; color: var(--ink-soft); max-width: 60ch; }
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+.fact { background: var(--surface); padding: 0.9rem 1rem; }
+.fact dt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.fact dd { margin: 0; font-size: 0.93rem; line-height: 1.45; }
+
+/* ---- contents ---- */
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1.4rem 1.6rem;
+}
+.toc ol { margin: 0.8rem 0 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+/* ---- parts ---- */
+.part { display: flex; flex-direction: column; gap: 1.75rem; }
+.part-head { display: flex; flex-direction: column; gap: 0.55rem; }
+.part-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ---- chips ---- */
+.chips { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.chip {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.67rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.24rem 0.55rem;
+  border-radius: 3px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.chip-safe   { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.chip-change { color: var(--warn);   background: var(--warn-soft);   border-color: var(--warn); }
+.chip-once   { color: var(--muted);  background: var(--surface-alt); border-color: var(--rule-strong); }
+
+/* ---- steps ---- */
+.steps { display: flex; flex-direction: column; gap: 1.5rem; counter-reset: step; }
+.step {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 1.4rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.step-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+.step-n {
+  counter-increment: step;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--accent);
+  border-radius: 3px;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.step-n::before { content: counter(step); }
+.step p { font-size: 0.98rem; }
+
+.expect {
+  border-left: 2px solid var(--rule-strong);
+  padding-left: 0.9rem;
+  font-size: 0.93rem;
+  color: var(--ink-soft);
+}
+.expect strong {
+  font-family: Archivo, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+/* ---- callouts ---- */
+.note {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 0.9rem 1.1rem;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.note.warn  { border-color: var(--warn);  background: var(--warn-soft); }
+.note.alert { border-color: var(--alert); background: var(--alert-soft); }
+.note-label {
+  font-family: Archivo, sans-serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.note p { font-size: 0.95rem; max-width: 62ch; }
+
+/* ---- tables ---- */
+.table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 32rem; }
+th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th {
+  font-family: Archivo, sans-serif;
+  font-size: 0.71rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-alt);
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: 0; }
+td .mono { font-size: 0.85em; }
+
+/* ---- troubleshooting ---- */
+.fault { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); overflow: hidden; }
+.fault + .fault { margin-top: 0.8rem; }
+.fault summary {
+  cursor: pointer;
+  padding: 0.85rem 1.1rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+  color: var(--alert);
+  list-style: none;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.fault summary::-webkit-details-marker { display: none; }
+.fault summary::before { content: "▸"; color: var(--muted); flex: none; }
+.fault[open] summary::before { content: "▾"; }
+.fault[open] summary { border-bottom: 1px solid var(--rule); }
+.fault-body { padding: 1.1rem; display: flex; flex-direction: column; gap: 0.8rem; font-size: 0.95rem; }
+
+ul.tight { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.96rem; }
+
+.closing {
+  border-top: 2px solid var(--ink);
+  padding-top: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Microsoft 365 · Cross-tenant migration</div>
+    <h1>Tenant Migration Runbook</h1>
+    <p class="standfirst">How to move guest users and their group permissions between tenants, and reset SharePoint site access — written for administrators who know Microsoft 365 but not PowerShell.</p>
+    <dl class="facts">
+      <div class="fact"><dt>You need</dt><dd>Global Administrator in both tenants</dd></div>
+      <div class="fact"><dt>Setup time</dt><dd>About 30 minutes, once</dd></div>
+      <div class="fact"><dt>Typing required</dt><dd>Answering menu questions</dd></div>
+      <div class="fact"><dt>Reversible?</dt><dd>Nothing is deleted, ever</dd></div>
+    </dl>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <h2>What's in here</h2>
+    <ol>
+      <li><a href="#setup">One-time setup</a> — install everything, register the app</li>
+      <li><a href="#guests">Moving the guests</a> — export, rehearse, pilot, commit</li>
+      <li><a href="#sharepoint">SharePoint access</a> — owner report, demote members</li>
+      <li><a href="#reports">Reading the reports</a> — what every column means</li>
+      <li><a href="#trouble">When something goes wrong</a> — errors, verbatim</li>
+      <li><a href="#after">Afterwards</a> — clean-up you shouldn't skip</li>
+    </ol>
+  </nav>
+
+  <section>
+    <h2>How this works</h2>
+    <p>You never write PowerShell. One script asks questions, and runs the right thing based on your answers:</p>
+    <pre><code>cd ~/365-User-Management-
+./Start-MigrationToolkit.ps1</code></pre>
+    <p style="margin-top:1.1rem">Two rules hold throughout, and they're worth trusting:</p>
+    <div class="note" style="margin-top:0.9rem">
+      <span class="note-label">The safety model</span>
+      <p><strong>Nothing is ever removed.</strong> The guest scripts only add — people, memberships, ownerships. If something already exists, it's left alone. Running any task twice changes nothing the second time.</p>
+      <p><strong>Every change is rehearsed.</strong> Tasks that touch your tenant run in preview first, write a log of exactly what they <em>would</em> do, and wait for you to say yes.</p>
+    </div>
+    <p style="margin-top:1.1rem">Throughout this guide, tasks are marked <span class="chip chip-safe">Read-only</span> or <span class="chip chip-change">Changes your tenant</span>.</p>
+  </section>
+
+  <section class="part" id="setup">
+    <div class="part-head">
+      <div class="part-num">Part 1</div>
+      <h2>One-time setup</h2>
+      <div class="chips"><span class="chip chip-once">Do this once per tenant</span></div>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Install PowerShell 7</h3></div>
+        <p>Not "Windows PowerShell" — that's the older blue one. You want PowerShell 7, which is a separate free install from Microsoft and runs on Windows, macOS and Linux.</p>
+        <div class="expect"><strong>Check it worked</strong>Open a terminal, type <code>pwsh</code>, then <code>$PSVersionTable.PSVersion</code>. You want 7 or higher.</div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Get the toolkit</h3></div>
+        <p>Clone it rather than downloading a ZIP. Fixes arrive as updates, and a clone picks them up with one command.</p>
+        <pre><code>cd ~
+git clone https://github.com/Radverth/365-User-Management-.git
+cd 365-User-Management-</code></pre>
+        <div class="note warn">
+          <span class="note-label">Don't use a ZIP</span>
+          <p>An extracted ZIP has no update mechanism, and the folder names it creates (<span class="mono">…--main</span>) are easy to confuse with a clone. Later, <code>git pull</code> in this folder gets you every fix.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Install the modules</h3></div>
+        <p>Start the menu and choose <strong>Check and install what is needed</strong>. It lists what's missing and offers to install it for your user account only — no admin rights needed.</p>
+        <pre><code>./Start-MigrationToolkit.ps1</code></pre>
+        <div class="expect"><strong>What you should see</strong>Five modules listed, each either a version number or <span class="mono">MISSING</span>. Say yes to the install and it fetches them from the PowerShell Gallery. Takes a few minutes.</div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Register an Entra app</h3></div>
+        <p>The SharePoint tooling needs an app registration in your tenant — Microsoft removed the shared one it used to rely on. Run this once, signed in as an administrator who can consent to app registrations:</p>
+        <pre><code>Register-PnPEntraIDAppForInteractiveLogin `
+    -ApplicationName "PnP Migration" `
+    -Tenant contoso.onmicrosoft.com `
+    -SharePointDelegatePermissions "AllSites.FullControl" `
+    -GraphDelegatePermissions "Group.Read.All","User.Read.All"</code></pre>
+        <p>Replace <span class="mono">contoso.onmicrosoft.com</span> with your own tenant name. A browser opens for sign-in and consent.</p>
+        <div class="expect"><strong>Keep this</strong>It prints a <strong>client ID</strong> — a long value like <span class="mono">66792cc7-5f4e-…</span>. Every SharePoint task asks for it. Write it down.</div>
+        <div class="note">
+          <span class="note-label">Why the permissions are spelled out</span>
+          <p>Left off, the command grants more than these scripts need — including write access to groups and users. The four scopes above are the actual requirement: full control of SharePoint sites, and read-only on groups and users so the owner report can resolve names.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Optional — a certificate for every site</h3></div>
+        <p>Skip this unless you need it. Signing in as yourself only reaches sites you personally administer. Being SharePoint Administrator is <em>not</em> the same as being a site collection administrator, so on most team sites some reads will be refused.</p>
+        <p>If you need full coverage — and you will for demoting members across sites you don't own — create a certificate and let the scripts sign in as the application instead:</p>
+        <pre><code><span class="c"># 1. create the certificate</span>
+cd Setup
+./New-AppOnlyCertificate.ps1 -CommonName "PnP Migration" -ValidYears 1 `
+    -OutPath ~/certs -CertificatePassword (Read-Host -AsSecureString)</code></pre>
+        <p>Then in the Entra portal, open <strong>App registrations → your app → Certificates &amp; secrets → Certificates → Upload certificate</strong> and upload the <span class="mono">.cer</span> file. Not the <span class="mono">.pfx</span> — that holds the private key and never leaves your machine.</p>
+        <p>The app also needs the application permission <span class="mono">Sites.FullControl.All</span>, granted and admin-consented in the portal.</p>
+        <div class="note alert">
+          <span class="note-label">Treat this seriously</span>
+          <p><span class="mono">Sites.FullControl.All</span> is unrestricted write access to every site in the tenant, held by a file on your disk. Password-protect the <span class="mono">.pfx</span>, keep it out of shared folders, and delete both it and the app registration when the migration is finished.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="part" id="guests">
+    <div class="part-head">
+      <div class="part-num">Part 2</div>
+      <h2>Moving the guests</h2>
+      <p>Do these in order. Each step depends on the one before it.</p>
+    </div>
+
+    <div class="note warn">
+      <span class="note-label">Before you start</span>
+      <p>The groups must already exist in the new tenant, <strong>with exactly the same display names</strong>. That's what the import matches on — group IDs are different in every tenant and can't be used. Migrate your groups first.</p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Export from the old tenant</h3><span class="chip chip-safe">Read-only</span></div>
+        <p>Menu option <strong>1</strong>. Sign in to the tenant you're moving <em>away from</em>. It reads every guest and the groups they belong to.</p>
+        <div class="expect"><strong>What you get</strong>Two spreadsheets. <span class="mono">TenantA_GuestPermissions.csv</span> is the one the import reads. <span class="mono">…_Unsupported.csv</span> lists memberships that can't be recreated automatically — deal with those at step 6.</div>
+        <div class="note">
+          <span class="note-label">Fewer guests than expected?</span>
+          <p>Guests who are blocked from signing in, and guests who never accepted their original invitation, are left out by default. The wizard asks about both — say yes if you want them.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Check the group names</h3><span class="chip chip-safe">Read-only</span></div>
+        <p>Open the export and look at the <span class="mono">GroupDisplayName</span> column. Every one of those names needs to exist in the new tenant, spelled identically. This is the single most common cause of a half-finished migration.</p>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Rehearse the import</h3><span class="chip chip-safe">Read-only</span></div>
+        <p>Menu option <strong>2</strong>, signing in to the <em>new</em> tenant. The wizard automatically previews before doing anything. Nothing is created yet — but every group name is checked against the new tenant, which is the point.</p>
+        <div class="expect"><strong>What to look for</strong>Open the log file it writes. Any row with status <span class="mono">GroupNotFound</span> is a group missing from the new tenant. Fix those before going further, or those memberships are silently skipped.</div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Pilot with a handful</h3><span class="chip chip-change">Changes your tenant</span></div>
+        <p>The wizard offers to start with a few guests. Take it — five is plenty. Say <strong>no</strong> to the invitation email for now.</p>
+        <div class="expect"><strong>Then check by hand</strong>In the Entra admin centre, find one of those guests. Confirm they exist and are in the right groups. It's much cheaper to find a problem now than after two hundred invitations.</div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Run it for everyone</h3><span class="chip chip-change">Changes your tenant</span></div>
+        <p>Same task, no limit this time. The pilot guests are already there, so they're skipped rather than duplicated.</p>
+        <div class="note">
+          <span class="note-label">The invitation email is your decision</span>
+          <p>By default guests are created silently — they appear in the directory and can be added to groups, but receive nothing. Say yes to the email only when you're ready for people to be told. Re-running never re-mails anyone who already exists.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Handle what's left over</h3><span class="chip chip-change">Changes your tenant</span></div>
+        <p>Open <span class="mono">…_Unsupported.csv</span>. These need doing by hand, in Exchange Online PowerShell or the admin centre:</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Group type</th><th>Why it's here</th><th>What to do</th></tr></thead>
+            <tbody>
+              <tr><td>Distribution list</td><td>Graph cannot add members to these</td><td><span class="mono">Add-DistributionGroupMember</span> in Exchange Online</td></tr>
+              <tr><td>Mail-enabled security group</td><td>Same</td><td>Same</td></tr>
+              <tr><td>Dynamic group</td><td>Membership comes from a rule, not a member list</td><td>Recreate the rule in the new tenant</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="part" id="sharepoint">
+    <div class="part-head">
+      <div class="part-num">Part 3</div>
+      <h2>SharePoint access</h2>
+      <p>Independent of the guest migration — run these whenever you need them.</p>
+    </div>
+
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Find out who owns what</h3><span class="chip chip-safe">Read-only</span></div>
+        <p>Menu option <strong>3</strong>. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with <span class="mono">-admin</span> inserted, so <span class="mono">contoso.sharepoint.com</span> becomes <span class="mono">contoso-admin.sharepoint.com</span>.</p>
+        <p>"Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see <a href="#reports">Reading the reports</a>.</p>
+        <div class="note warn">
+          <span class="note-label">Watch for orphaned sites</span>
+          <p>A row marked <span class="mono">OrphanedGroup</span> means the site is connected to a Microsoft 365 group that no longer exists. Those sites have no owners at all and no group to inherit them from. Assign someone before migrating anything.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-n"></span><h3>Make members read-only</h3><span class="chip chip-change">Changes your tenant</span></div>
+        <p>Menu option <strong>4</strong>. Moves people out of a site's Members group and into Visitors, so they can read but not edit. People are added to Visitors <em>before</em> being removed from Members, so nobody is ever left with no access.</p>
+        <p>Three questions decide the scope:</p>
+        <ul class="tight">
+          <li><strong>Guests only, or everyone?</strong> Guests only is the default. Your own staff keep their access unless you say otherwise.</li>
+          <li><strong>Move the Team entry?</strong> On a Teams-connected site this is the important one — see below.</li>
+          <li><strong>Anyone to leave alone?</strong> Give the email addresses of service or break-glass accounts that must keep editing.</li>
+        </ul>
+        <div class="note">
+          <span class="note-label">Teams sites work differently</span>
+          <p>On a site connected to a Team, the Members list contains the Team itself — shown as <em>"&lt;Site&gt; Members"</em> — alongside any individuals. Moving that single entry makes the whole team read-only on that site in one step, including people who join later.</p>
+          <p>It does <strong>not</strong> affect Teams chat, the group mailbox or the calendar. Microsoft 365 group membership is never modified, deliberately — removing someone there would strip all three.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="part" id="reports">
+    <div class="part-head">
+      <div class="part-num">Part 4</div>
+      <h2>Reading the reports</h2>
+      <p>Everything writes a CSV. These are the values worth understanding.</p>
+    </div>
+
+    <h3>Guest import log</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><span class="mono">Created</span></td><td>New guest invited</td><td>None</td></tr>
+          <tr><td><span class="mono">AlreadyExists</span></td><td>Guest was already there and was reused</td><td>None — this is the re-run behaviour working</td></tr>
+          <tr><td><span class="mono">Added</span> / <span class="mono">AlreadyMember</span></td><td>Group membership created, or already present</td><td>None</td></tr>
+          <tr><td><span class="mono">GroupNotFound</span></td><td>No group of that name in the new tenant</td><td><strong>Create the group, then re-run</strong></td></tr>
+          <tr><td><span class="mono">Skipped</span></td><td>Can't be done via Graph, or the name is ambiguous</td><td>Check the Detail column</td></tr>
+          <tr><td><span class="mono">Failed</span></td><td>Graph rejected it</td><td>Read the Detail column</td></tr>
+          <tr><td><span class="mono">WhatIf</span></td><td>Rehearsal — nothing was changed</td><td>None</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:2rem">Site owners report</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>OwnerSource</th><th>What it actually is</th></tr></thead>
+        <tbody>
+          <tr><td><span class="mono">SiteCollectionAdmin</span></td><td>Full control of the site collection. The real administrators — and the ones most often overlooked.</td></tr>
+          <tr><td><span class="mono">OwnersGroup</span></td><td>Members of the site's Owners group in SharePoint.</td></tr>
+          <tr><td><span class="mono">Microsoft365GroupOwner</span></td><td>Owners of the connected group. On a Teams site these <em>are</em> the owners, even when the Owners group looks empty.</td></tr>
+          <tr><td><span class="mono">TenantSiteOwner</span></td><td>The primary owner recorded against the site collection.</td></tr>
+          <tr><td><span class="mono">OrphanedGroup</span></td><td>The connected group is gone. This site has no owners — assign one.</td></tr>
+          <tr><td><span class="mono">Error</span></td><td>You couldn't open that site, so its group-level owners are missing from the report.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:0.9rem;font-size:0.95rem;color:var(--ink-soft)">Guest owners are flagged in the <span class="mono">IsGuest</span> column — worth reviewing before a migration. The <span class="mono">SHAREPOINT\system</span> account and the tenant-wide admin roles are filtered out by default, since they appear identically on nearly every site.</p>
+  </section>
+
+  <section class="part" id="trouble">
+    <div class="part-head">
+      <div class="part-num">Part 5</div>
+      <h2>When something goes wrong</h2>
+      <p>Real errors, and what each one actually means. Search this section for the text you're seeing.</p>
+    </div>
+
+    <details class="fault">
+      <summary>Input CSV is missing required column(s)…</summary>
+      <div class="fault-body">
+        <p>The columns are almost certainly there. The file didn't parse into columns at all, so every one looks missing. The error names the file and the columns it <em>did</em> find, which tells you which case you're in:</p>
+        <ul class="tight">
+          <li><strong>It's an Excel workbook wearing a .csv name.</strong> Opening a CSV in Excel and using <em>Save As</em> writes a real .xlsx while leaving the extension alone. Re-export, or save as <em>CSV UTF-8 (Comma delimited)</em>.</li>
+          <li><strong>The file has no line breaks.</strong> Something flattened it in transit. It can't be recovered — re-export, and move it as a file rather than pasting its contents.</li>
+          <li><strong>It's the wrong file.</strong> The <span class="mono">Found:</span> line lists the real columns; compare them against what you meant to pass.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="fault">
+      <summary>Attempted to perform an unauthorized operation.</summary>
+      <div class="fault-body">
+        <p>Expected, not a fault. You're not a site collection administrator on that site — being SharePoint Administrator doesn't grant that automatically.</p>
+        <p>Only two of the owner sources need site access. Teams sites still report their real owners through Graph, and other sites still report their primary owner, so those rows aren't blank. For the full picture, either use the app-only certificate from Part 1, or add yourself as site collection administrator on the sites you care about and re-run.</p>
+      </div>
+    </details>
+
+    <details class="fault">
+      <summary>The specified X509 certificate store does not exist.</summary>
+      <div class="fault-body">
+        <p>You're on Linux or macOS and used a certificate thumbprint that isn't installed on this machine. Point at the file instead:</p>
+        <pre><code>-CertificatePath ~/certs/PnPMigration.pfx `
+-CertificatePassword (Read-Host -AsSecureString)</code></pre>
+        <p>That works identically on Windows too, which makes it the better habit.</p>
+      </div>
+    </details>
+
+    <details class="fault">
+      <summary>You're asked to sign in at every single site</summary>
+      <div class="fault-body">
+        <p>Your PnP module is too old to cache the sign-in. Update it:</p>
+        <pre><code>Update-Module PnP.PowerShell</code></pre>
+        <p>The scripts warn about this at startup when they detect it. Menu option 6 offers the update for you.</p>
+      </div>
+    </details>
+
+    <details class="fault">
+      <summary>A parameter cannot be found that matches parameter name…</summary>
+      <div class="fault-body">
+        <p>Your copy of the scripts is older than the command you're running. Update it:</p>
+        <pre><code>cd ~/365-User-Management-
+git pull</code></pre>
+        <p>If that says <span class="mono">not a git repository</span>, you have an extracted ZIP rather than a clone. Go back to Part 1, step 2.</p>
+      </div>
+    </details>
+
+    <details class="fault">
+      <summary>Nothing happens, or it asks for "SiteUrl[0]"</summary>
+      <div class="fault-body">
+        <p>You ran a script directly without telling it which sites to work on. Use the menu instead — it asks the questions in the right order:</p>
+        <pre><code>cd ~/365-User-Management-
+./Start-MigrationToolkit.ps1</code></pre>
+      </div>
+    </details>
+  </section>
+
+  <section class="part" id="after">
+    <div class="part-head">
+      <div class="part-num">Part 6</div>
+      <h2>Afterwards</h2>
+    </div>
+    <ul class="tight">
+      <li><strong>Keep the CSVs.</strong> They're your record of what the permissions were and what was done — worth archiving somewhere durable.</li>
+      <li><strong>Delete the app registration</strong> once the migration is done, particularly if you granted <span class="mono">Sites.FullControl.All</span>.</li>
+      <li><strong>Delete the .pfx file.</strong> It authenticates as the application. It has no other purpose once the app is gone.</li>
+      <li><strong>Remove any temporary site collection admin rights</strong> you granted yourself along the way.</li>
+    </ul>
+  </section>
+
+  <footer class="closing">
+    <p style="font-size:0.95rem;color:var(--muted)">Every task in this guide writes a CSV, and every task that changes your tenant rehearses first. If you're ever unsure what something will do, run it and read the preview — that's what it's for.</p>
+  </footer>
+
+</div>
