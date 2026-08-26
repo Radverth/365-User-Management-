@@ -27,7 +27,10 @@ Install-Module Microsoft.Graph -Scope CurrentUser      # guest scripts
 Install-Module PnP.PowerShell  -Scope CurrentUser      # SharePoint scripts
 ```
 
-All scripts sign in interactively and support MFA.
+All scripts sign in interactively and support MFA. The two SharePoint scripts also
+accept certificate-based app-only sign-in, which is the only way to reach every site
+in a tenant — see [App-only access to every
+site](#app-only-access-to-every-site-optional).
 
 ### Entra app registration for PnP.PowerShell
 
@@ -65,6 +68,51 @@ Application Administrator or Global Administrator.
 > Use your real tenant name, e.g. `contoso.onmicrosoft.com`. Getting it wrong
 > registers the app in the wrong place or fails outright. If you are unsure, the
 > `SourceUserPrincipalName` column of your guest export shows it after the `#EXT#@`.
+
+### App-only access to every site (optional)
+
+Interactive sign-in uses **delegated** permissions: your effective access is the
+app's permissions intersected with your own. Being SharePoint Administrator does
+not make you a site collection administrator, so reads inside sites you do not own
+are refused — that is what "Attempted to perform an unauthorized operation" means.
+Granting the app more permissions changes nothing while you are signing in as
+yourself.
+
+App-only sign-in fixes that. The script authenticates as the *application*, using
+application permissions, which are not limited by anyone's site membership. Register
+a second app with a certificate:
+
+```powershell
+Register-PnPEntraIDApp `
+    -ApplicationName "PnP Migration App-Only" `
+    -Tenant contoso.onmicrosoft.com `
+    -OutPath C:\Certs `
+    -DeviceLogin
+```
+
+That creates the app, generates a self-signed certificate, installs it locally and
+requests `Sites.FullControl.All` (SharePoint), plus `Group.ReadWrite.All` and
+`User.Read.All` (Graph). A Global Administrator must grant admin consent before it
+works. Note the client ID and certificate thumbprint it prints, then:
+
+```powershell
+.\Get-SiteOwners.ps1 -AllSites `
+    -TenantAdminUrl https://contoso-admin.sharepoint.com `
+    -ClientId <app id> `
+    -Tenant contoso.onmicrosoft.com `
+    -Thumbprint <certificate thumbprint>
+```
+
+Both SharePoint scripts take `-Tenant` with either `-Thumbprint` or
+`-CertificatePath` (plus `-CertificatePassword` for a .pfx). Supplying a
+certificate is what switches the script to app-only — there is no separate mode
+switch. Nothing prompts, so this also suits scheduled runs.
+
+`Sites.FullControl.All` is full write access to every site in the tenant, held by a
+certificate on disk. Treat it accordingly: it is worth deleting the app registration
+once the migration is finished. If you only need the owners report and would rather
+not hold that, stay interactive — group-connected sites still report their real
+owners through Graph, and the rest report `TenantSiteOwner`.
 
 ### Graph permissions
 
@@ -374,9 +422,13 @@ still work, so those sites are not blank:
   For a Teams site those *are* the owners, so nothing is actually missing.
 - Other sites still report `TenantSiteOwner` from the tenant listing.
 
-If you need the SharePoint group detail as well, add yourself as a site collection
-administrator on those sites (SharePoint admin centre, or `Set-PnPTenantSite
--Owners`) and re-run.
+Two ways to get the SharePoint group detail as well:
+
+- **App-only sign-in** — see
+  [App-only access to every site](#app-only-access-to-every-site-optional). The app
+  authenticates as itself with `Sites.FullControl.All` and reaches every site.
+- **Make yourself a site collection administrator** on the sites you care about
+  (SharePoint admin centre, or `Set-PnPTenantSite -Owners`) and re-run.
 
 ### Owner names are blank on Microsoft 365 group rows
 

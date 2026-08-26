@@ -67,6 +67,21 @@
     that appear as site collection administrators on most sites. Excluded by
     default, and the number removed is reported at the end.
 
+.PARAMETER Tenant
+    Tenant name, e.g. contoso.onmicrosoft.com. Required for app-only sign-in.
+
+.PARAMETER Thumbprint
+    Thumbprint of a certificate in your certificate store. Supplying it switches
+    the script to app-only sign-in, where access comes from the app registration's
+    application permissions rather than your own site access. With SharePoint
+    Sites.FullControl.All this reaches every site in the tenant and never prompts.
+
+.PARAMETER CertificatePath
+    Path to a .pfx instead of -Thumbprint. Also switches to app-only sign-in.
+
+.PARAMETER CertificatePassword
+    Password for -CertificatePath, as a SecureString.
+
 .PARAMETER NoPersistedLogin
     Sign in afresh for every site instead of reusing a cached token. Only needed
     when you must connect as different accounts, or to work around a stale token.
@@ -110,6 +125,14 @@ param(
 
     [string]$Delimiter,
 
+    [string]$Tenant,
+
+    [string]$Thumbprint,
+
+    [string]$CertificatePath,
+
+    [System.Security.SecureString]$CertificatePassword,
+
     [switch]$NoPersistedLogin,
 
     [switch]$IncludeSystemPrincipals
@@ -150,6 +173,10 @@ if (-not (Test-Path -Path $pnpConnectPath)) {
 
 Initialize-OutputPath -Path $OutputPath
 
+$auth = New-ScriptAuthContext -ClientId $ClientId -Tenant $Tenant -Thumbprint $Thumbprint `
+                              -CertificatePath $CertificatePath -CertificatePassword $CertificatePassword `
+                              -NoPersistedLogin:$NoPersistedLogin
+
 # Resolve the list of sites.
 $sites = @()
 
@@ -172,7 +199,7 @@ switch ($PSCmdlet.ParameterSetName) {
     'All' {
         Write-Host "Connecting to $TenantAdminUrl to enumerate sites..." -ForegroundColor Cyan
 
-        Connect-ScriptSite -Url $TenantAdminUrl -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
+        Connect-ScriptSite -Url $TenantAdminUrl -Auth $auth
 
         $tenantSites = @(Get-PnPTenantSite -ErrorAction Stop)
 
@@ -219,7 +246,7 @@ if ($sites.Count -eq 0) {
 }
 
 Write-Host "Reporting owners for $($sites.Count) site(s)..." -ForegroundColor Cyan
-Write-PnPLoginAdvice -NoPersistedLogin:$NoPersistedLogin
+Write-PnPLoginAdvice -Auth $auth
 Write-Host ''
 
 $report = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -317,7 +344,7 @@ foreach ($site in $sites) {
     }
 
     try {
-        Connect-ScriptSite -Url $site -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
+        Connect-ScriptSite -Url $site -Auth $auth
     }
     catch {
         # Being SharePoint Administrator does not grant access to every site, so

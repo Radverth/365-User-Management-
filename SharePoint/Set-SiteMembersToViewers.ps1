@@ -62,6 +62,21 @@
 .PARAMETER Delimiter
     Field separator of -SitesCsvPath. Detected automatically when omitted.
 
+.PARAMETER Tenant
+    Tenant name, e.g. contoso.onmicrosoft.com. Required for app-only sign-in.
+
+.PARAMETER Thumbprint
+    Thumbprint of a certificate in your certificate store. Supplying it switches
+    the script to app-only sign-in, where access comes from the app registration's
+    application permissions rather than your own site access. With SharePoint
+    Sites.FullControl.All this reaches every site in the tenant and never prompts.
+
+.PARAMETER CertificatePath
+    Path to a .pfx instead of -Thumbprint. Also switches to app-only sign-in.
+
+.PARAMETER CertificatePassword
+    Password for -CertificatePath, as a SecureString.
+
 .PARAMETER NoPersistedLogin
     Sign in afresh for every site instead of reusing a cached token. Only needed
     when you must connect as different accounts, or to work around a stale token.
@@ -105,6 +120,14 @@ param(
     [string]$OutputPath = ".\SharePoint_MembersToViewers_Log.csv",
 
     [string]$Delimiter,
+
+    [string]$Tenant,
+
+    [string]$Thumbprint,
+
+    [string]$CertificatePath,
+
+    [System.Security.SecureString]$CertificatePassword,
 
     [switch]$NoPersistedLogin
 )
@@ -171,6 +194,10 @@ if ($sites.Count -eq 0) { throw 'No site URLs to process.' }
 
 Initialize-OutputPath -Path $OutputPath
 
+$auth = New-ScriptAuthContext -ClientId $ClientId -Tenant $Tenant -Thumbprint $Thumbprint `
+                              -CertificatePath $CertificatePath -CertificatePassword $CertificatePassword `
+                              -NoPersistedLogin:$NoPersistedLogin
+
 Write-Host ''
 if ($IncludeInternalUsers) {
     Write-Host 'Scope: ALL members (guests and internal users).' -ForegroundColor Yellow
@@ -184,7 +211,7 @@ if (-not $RemoveFromMembers) {
 }
 
 Write-Host "Sites to process: $($sites.Count)" -ForegroundColor Cyan
-Write-PnPLoginAdvice -NoPersistedLogin:$NoPersistedLogin
+Write-PnPLoginAdvice -Auth $auth
 Write-Host ''
 
 $log = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -229,7 +256,7 @@ foreach ($site in $sites) {
     # --- connect ------------------------------------------------------------
 
     try {
-        Connect-ScriptSite -Url $site -ClientId $ClientId -NoPersistedLogin:$NoPersistedLogin
+        Connect-ScriptSite -Url $site -Auth $auth
     }
     catch {
         Write-Warning "  Could not connect: $($_.Exception.Message)"
