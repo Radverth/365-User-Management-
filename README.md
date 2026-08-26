@@ -6,8 +6,29 @@ Microsoft 365 tenant to another, plus SharePoint site permission tooling.
 Every script writes its results to CSV and the ones that change anything support
 `-WhatIf`.
 
+## Start here
+
+If you would rather answer questions than remember parameters:
+
+```powershell
+./Start-MigrationToolkit.ps1
+```
+
+A guided menu covering every task. It explains each step in plain language,
+checks what you type, and prints the equivalent command so you can repeat a run
+without it later. Anything that changes your tenant is rehearsed first: it runs
+in preview, shows you the result, and only commits after you say yes.
+
+Works on Windows, Linux and macOS. It runs in the terminal rather than in a
+window, because PowerShell's windowing (WinForms and WPF) is Windows-only and
+these scripts have to run on Linux too.
+
+The rest of this README documents the underlying scripts, which you can always
+run directly.
+
 | Script | Tenant | Changes anything? |
 |---|---|---|
+| [`Start-MigrationToolkit.ps1`](Start-MigrationToolkit.ps1) | Either | Only via the task you choose |
 | [`Guests/Export-GuestPermissions.ps1`](Guests/Export-GuestPermissions.ps1) | A (source) | No |
 | [`Guests/Import-GuestPermissions.ps1`](Guests/Import-GuestPermissions.ps1) | B (target) | Yes |
 | [`SharePoint/Set-SiteMembersToViewers.ps1`](SharePoint/Set-SiteMembersToViewers.ps1) | Either | Yes |
