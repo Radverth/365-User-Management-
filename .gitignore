@@ -1,0 +1,11 @@
+# Private keys and certificates. A .pfx authenticates as the application -
+# it must never be committed.
+*.pfx
+*.p12
+*.cer
+*.crt
+*.pem
+*.key
+
+# Report and log output produced by the scripts.
+*.csv

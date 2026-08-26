@@ -13,6 +13,7 @@ Every script writes its results to CSV and the ones that change anything support
 | [`SharePoint/Set-SiteMembersToViewers.ps1`](SharePoint/Set-SiteMembersToViewers.ps1) | Either | Yes |
 | [`SharePoint/Get-SiteOwners.ps1`](SharePoint/Get-SiteOwners.ps1) | Either | No |
 | [`Reports/Get-M365UserPermissionsReport.ps1`](Reports/Get-M365UserPermissionsReport.ps1) | Either | No |
+| [`Setup/New-AppOnlyCertificate.ps1`](Setup/New-AppOnlyCertificate.ps1) | — | Local files only |
 
 `Common/` holds shared helpers the other scripts dot-source (`InputCsv.ps1` for CSV
 input, `PnPConnect.ps1` for SharePoint sign-in). Keep the folder structure intact —
@@ -90,6 +91,11 @@ Register-PnPEntraIDApp `
     -DeviceLogin
 ```
 
+If you already have the app and only need a new certificate, skip this and see
+[Creating or rotating the certificate](#creating-or-rotating-the-certificate) —
+re-running the registration creates a second app registration rather than updating
+the first.
+
 That creates the app, generates a self-signed certificate, installs it locally and
 requests `Sites.FullControl.All` (SharePoint), plus `Group.ReadWrite.All` and
 `User.Read.All` (Graph). A Global Administrator must grant admin consent before it
@@ -107,6 +113,37 @@ Both SharePoint scripts take `-Tenant` with either `-Thumbprint` or
 `-CertificatePath` (plus `-CertificatePassword` for a .pfx). Supplying a
 certificate is what switches the script to app-only — there is no separate mode
 switch. Nothing prompts, so this also suits scheduled runs.
+
+#### Creating or rotating the certificate
+
+`Setup/New-AppOnlyCertificate.ps1` generates one on any platform:
+
+```powershell
+cd Setup
+./New-AppOnlyCertificate.ps1 -CommonName "PnP Migration" -ValidYears 1 `
+    -OutPath ~/certs -CertificatePassword (Read-Host -AsSecureString)
+```
+
+It writes a `.pfx` (private key, used by the scripts) and a `.cer` (public key,
+uploaded to Entra), prints the thumbprint, and refuses to overwrite existing files
+without `-Force`. Add `-Install` to also place it in your CurrentUser certificate
+store so `-Thumbprint` works.
+
+It uses .NET's certificate API directly rather than `New-SelfSignedCertificate`
+(Windows only) or `New-PnPAzureCertificate` (which fails on some PowerShell 7.4
+builds — [pnp/powershell#3838](https://github.com/pnp/powershell/discussions/3838)),
+so it behaves the same everywhere.
+
+Then upload the `.cer`: **Entra portal → App registrations → your app →
+Certificates & secrets → Certificates → Upload certificate**.
+
+To rotate an expiring certificate without changing the app's client ID, upload the
+new `.cer` alongside the old one, switch the scripts over, then delete the old
+entry.
+
+The `.pfx` authenticates as the application. It is covered by `.gitignore`, but keep
+it out of shared locations, and delete it along with the app registration once the
+migration is done.
 
 #### Windows, Linux and macOS
 
