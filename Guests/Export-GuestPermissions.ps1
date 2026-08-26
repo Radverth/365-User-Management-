@@ -219,6 +219,15 @@ function New-MembershipRow {
     }
 }
 
+# Shared CSV handling - see Common/InputCsv.ps1
+$commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
+
+if (-not (Test-Path -Path $commonPath)) {
+    throw "Could not find $commonPath. Run this script from inside a full clone of the repository - it depends on the shared helper in Common/."
+}
+
+. $commonPath
+
 #endregion Helpers ------------------------------------------------------------
 
 Initialize-OutputPath -Path $OutputPath
@@ -386,6 +395,12 @@ $sorted = $rows | Sort-Object GuestDisplayName, GroupDisplayName
 
 $sorted | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
 
+# Confirm the file we just wrote can be read back. A report that cannot be parsed
+# is worse than no report, and catching it here beats discovering it at import.
+$verified = Assert-WrittenCsv -Path $OutputPath -ExpectedRows $sorted.Count -RequiredColumns @(
+    'ExternalEmail', 'GuestDisplayName', 'GroupDisplayName', 'MembershipType', 'Importable'
+)
+
 $unsupported = @($sorted | Where-Object { -not $_.Importable -and $_.GroupDisplayName -ne 'None' })
 
 if ($unsupported.Count -gt 0) {
@@ -402,7 +417,12 @@ Write-Host "  Membership rows          : $($sorted.Count)"
 Write-Host "  Importable via Graph     : $importable"
 Write-Host "  Needs manual handling    : $($unsupported.Count)"
 Write-Host ''
-Write-Host "  Report : $((Resolve-Path -Path $OutputPath).Path)" -ForegroundColor Green
+if ($verified) {
+    Write-Host "  Report : $((Resolve-Path -Path $OutputPath).Path)" -ForegroundColor Green
+}
+else {
+    Write-Host "  Report : $((Resolve-Path -Path $OutputPath).Path)  (FAILED VERIFICATION - see warnings above)" -ForegroundColor Red
+}
 
 if ($unsupported.Count -gt 0) {
     Write-Host "  Manual : $((Resolve-Path -Path $UnsupportedOutputPath).Path)" -ForegroundColor Yellow

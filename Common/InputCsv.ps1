@@ -67,6 +67,67 @@ function Assert-TextCsv {
     throw $message.ToString()
 }
 
+function Assert-WrittenCsv {
+    <#  Reads back a file we just wrote and checks it parses into the rows and
+        columns that went in.
+
+        Export-Csv is not supposed to be able to produce an unreadable file, but a
+        report that cannot be read is worthless, and finding out at import time -
+        possibly on a different machine, days later - wastes the whole round trip.
+        Verifying at the point of writing turns that into an immediate, local
+        failure with the evidence still to hand.
+
+        Returns $true when the file reads back correctly. #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][int]$ExpectedRows,
+        [string[]]$RequiredColumns = @()
+    )
+
+    if (-not (Test-Path -Path $Path)) {
+        Write-Warning "The report was not written to $Path."
+        return $false
+    }
+
+    $bytes = (Get-Item -Path $Path).Length
+    $raw   = [System.IO.File]::ReadAllText($Path)
+    $lines = ([regex]::Matches($raw, "`r`n|`n|`r")).Count
+
+    $problems = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        $readBack = @(Import-Csv -Path $Path -ErrorAction Stop)
+
+        $names = if ($readBack.Count -gt 0) { @($readBack[0].PSObject.Properties.Name) } else { @() }
+
+        if ($readBack.Count -ne $ExpectedRows) {
+            $problems.Add("wrote $ExpectedRows row(s) but read back $($readBack.Count)")
+        }
+
+        foreach ($column in $RequiredColumns) {
+            if ($column -notin $names) { $problems.Add("column '$column' is missing when read back") }
+        }
+    }
+    catch {
+        $problems.Add("reading it back failed: $($_.Exception.Message)")
+    }
+
+    if ($lines -lt $ExpectedRows) {
+        $problems.Add("the file holds $lines line break(s) for $ExpectedRows row(s) plus a header")
+    }
+
+    if ($problems.Count -eq 0) { return $true }
+
+    Write-Warning "The report at $Path did not read back correctly:"
+
+    foreach ($problem in $problems) { Write-Warning "  - $problem" }
+
+    Write-Warning "  File size: $bytes bytes, line breaks: $lines"
+    Write-Warning '  Do not rely on this file. Please report it with the two numbers above.'
+
+    return $false
+}
+
 function Import-InputCsv {
     <#  Import-Csv with the two failure modes that actually bite in the field.
 
