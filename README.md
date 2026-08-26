@@ -35,10 +35,36 @@ PnP.PowerShell no longer ships a shared multi-tenant app, so the SharePoint scri
 need an app registration in your own tenant. Once per tenant:
 
 ```powershell
-Register-PnPEntraIDAppForInteractiveLogin -ApplicationName "PnP Migration" -Tenant contoso.onmicrosoft.com -Interactive
+Register-PnPEntraIDAppForInteractiveLogin `
+    -ApplicationName "PnP Migration" `
+    -Tenant contoso.onmicrosoft.com `
+    -SharePointDelegatePermissions "AllSites.FullControl" `
+    -GraphDelegatePermissions "Group.Read.All"
 ```
 
-Note the client ID it prints and pass it as `-ClientId` to the SharePoint scripts.
+A browser opens for you to sign in and consent. Note the client ID it prints and
+pass it as `-ClientId` to the SharePoint scripts.
+
+There is **no `-Interactive` parameter** — interactive sign-in is what this cmdlet
+does by default, which is what the `ForInteractiveLogin` in its name means. (The
+switch exists on the older `Register-PnPAzureADApp`, which is a different cmdlet.)
+If no browser is available, or MFA makes the browser flow awkward, add
+`-DeviceLogin` to use the device code flow instead.
+
+The permission parameters above are optional but worth setting. Left off, the
+default grant is `AllSites.FullControl`, `Group.ReadWrite.All`,
+`User.ReadWrite.All` and `TermStore.ReadWrite.All` — more than these scripts need.
+`AllSites.FullControl` covers everything the SharePoint scripts do, and
+`Group.Read.All` is only there so `Get-SiteOwners.ps1` can read Microsoft 365 group
+owners. Neither script modifies Microsoft 365 groups, so the read-only Graph scope
+is enough.
+
+Registration needs an account that can create and consent app registrations —
+Application Administrator or Global Administrator.
+
+> Use your real tenant name, e.g. `contoso.onmicrosoft.com`. Getting it wrong
+> registers the app in the wrong place or fails outright. If you are unsure, the
+> `SourceUserPrincipalName` column of your guest export shows it after the `#EXT#@`.
 
 ### Graph permissions
 
@@ -259,6 +285,12 @@ report which one they used, so this now loads on its own. Force one with
 `Guests/Export-GuestPermissions.ps1`.
 
 A byte-order mark on the first column name is stripped automatically.
+
+### "A parameter cannot be found that matches parameter name 'Interactive'"
+
+`Register-PnPEntraIDAppForInteractiveLogin` has no `-Interactive` switch — see
+[Entra app registration](#entra-app-registration-for-pnppowershell) above. Drop it.
+Use `-DeviceLogin` if you need the device code flow.
 
 ### The export returned fewer guests than expected
 
