@@ -59,6 +59,9 @@
 .PARAMETER OutputPath
     CSV recording every principal considered and what happened to them.
 
+.PARAMETER Delimiter
+    Field separator of -SitesCsvPath. Detected automatically when omitted.
+
 .EXAMPLE
     .\Set-SiteMembersToViewers.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Project -ClientId $id -WhatIf
 
@@ -95,7 +98,9 @@ param(
 
     [bool]$RemoveFromMembers = $true,
 
-    [string]$OutputPath = ".\SharePoint_MembersToViewers_Log.csv"
+    [string]$OutputPath = ".\SharePoint_MembersToViewers_Log.csv",
+
+    [string]$Delimiter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -120,6 +125,15 @@ function Test-IsGuest {
     return ($login -imatch $Pattern)
 }
 
+# Shared CSV input handling - see Common/InputCsv.ps1
+$commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
+
+if (-not (Test-Path -Path $commonPath)) {
+    throw "Could not find $commonPath. Run this script from inside a full clone of the repository - it depends on the shared helper in Common/."
+}
+
+. $commonPath
+
 #endregion Helpers ------------------------------------------------------------
 
 # Resolve the list of sites.
@@ -129,13 +143,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Csv') {
         throw "Sites CSV not found: $SitesCsvPath"
     }
 
-    $csv = @(Import-Csv -Path $SitesCsvPath)
+    $csv = Import-InputCsv -Path $SitesCsvPath -Delimiter $Delimiter -RequiredColumns @('SiteUrl')
 
     if ($csv.Count -eq 0) { throw "Sites CSV is empty: $SitesCsvPath" }
-
-    if ('SiteUrl' -notin $csv[0].PSObject.Properties.Name) {
-        throw "Sites CSV must contain a 'SiteUrl' column. Found: $($csv[0].PSObject.Properties.Name -join ', ')"
-    }
 
     $sites = @($csv | Select-Object -ExpandProperty SiteUrl | Where-Object { $_ } | ForEach-Object { $_.Trim() })
 }

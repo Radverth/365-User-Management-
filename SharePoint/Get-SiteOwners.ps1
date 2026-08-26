@@ -52,6 +52,9 @@
 .PARAMETER OutputPath
     Destination CSV.
 
+.PARAMETER Delimiter
+    Field separator of -SitesCsvPath. Detected automatically when omitted.
+
 .EXAMPLE
     .\Get-SiteOwners.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Project -ClientId $id
 
@@ -87,7 +90,9 @@ param(
 
     [bool]$IncludeMicrosoft365GroupOwners = $true,
 
-    [string]$OutputPath = ".\SharePoint_SiteOwners.csv"
+    [string]$OutputPath = ".\SharePoint_SiteOwners.csv",
+
+    [string]$Delimiter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,6 +123,15 @@ function Connect-Site {
     Connect-PnPOnline @params
 }
 
+# Shared CSV input handling - see Common/InputCsv.ps1
+$commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
+
+if (-not (Test-Path -Path $commonPath)) {
+    throw "Could not find $commonPath. Run this script from inside a full clone of the repository - it depends on the shared helper in Common/."
+}
+
+. $commonPath
+
 #endregion Helpers ------------------------------------------------------------
 
 Initialize-OutputPath -Path $OutputPath
@@ -130,13 +144,9 @@ switch ($PSCmdlet.ParameterSetName) {
     'Csv' {
         if (-not (Test-Path -Path $SitesCsvPath)) { throw "Sites CSV not found: $SitesCsvPath" }
 
-        $csv = @(Import-Csv -Path $SitesCsvPath)
+        $csv = Import-InputCsv -Path $SitesCsvPath -Delimiter $Delimiter -RequiredColumns @('SiteUrl')
 
         if ($csv.Count -eq 0) { throw "Sites CSV is empty: $SitesCsvPath" }
-
-        if ('SiteUrl' -notin $csv[0].PSObject.Properties.Name) {
-            throw "Sites CSV must contain a 'SiteUrl' column. Found: $($csv[0].PSObject.Properties.Name -join ', ')"
-        }
 
         $sites = @($csv | Select-Object -ExpandProperty SiteUrl | Where-Object { $_ } | ForEach-Object { $_.Trim() })
     }

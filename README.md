@@ -14,6 +14,10 @@ Every script writes its results to CSV and the ones that change anything support
 | [`SharePoint/Get-SiteOwners.ps1`](SharePoint/Get-SiteOwners.ps1) | Either | No |
 | [`Reports/Get-M365UserPermissionsReport.ps1`](Reports/Get-M365UserPermissionsReport.ps1) | Either | No |
 
+`Common/InputCsv.ps1` is a shared helper the other scripts dot-source. Keep the
+folder structure intact — running a script from outside a full clone will fail with
+a message telling you so.
+
 ---
 
 ## Prerequisites
@@ -120,6 +124,7 @@ created on that run are emailed — re-running never re-mails anyone.
 | `-SkipGroupMembership` | Only create the guests. |
 | `-SkipOwnership` | Add guests as members but never as group owners. |
 | `-InviteRedirectUrl` | Where the guest lands after redeeming. Defaults to the My Apps portal. |
+| `-Delimiter` | Field separator of the input CSV. Detected automatically when omitted. |
 
 ### Re-running is safe
 
@@ -226,6 +231,40 @@ source can be turned off with `-IncludeSiteCollectionAdmins:$false`,
 
 With `-AllSites`, OneDrive personal sites are excluded unless you add
 `-IncludeOneDrive`.
+
+---
+
+## Troubleshooting
+
+### "Input CSV is missing required column(s)" — and every column is listed
+
+The columns are almost certainly present. The file did not parse into columns at
+all, so all of them look missing. The error names the file and the columns it
+actually found, which tells you which case you are in:
+
+**The file is an Excel workbook wearing a `.csv` name.** The most common cause.
+Opening a CSV in Excel and using *File > Save As* writes a real `.xlsx` while
+leaving the extension alone. The scripts detect this and say so explicitly. Fix it
+with *File > Save As > CSV UTF-8 (Comma delimited) (\*.csv)*, or re-run the export
+and feed the file straight in without opening it in Excel.
+
+**The separator is not a comma.** A file saved in a locale that uses semicolons
+parses as a single column. The scripts try `,` `;` tab and `|` automatically and
+report which one they used, so this now loads on its own. Force one with
+`-Delimiter ";"` if detection picks wrong.
+
+**It is the wrong file.** The `Found:` line in the error lists the real columns.
+`DisplayName, UserPrincipalName, Email, ...` means you passed the output of
+`Reports/Get-M365UserPermissionsReport.ps1` rather than
+`Guests/Export-GuestPermissions.ps1`.
+
+A byte-order mark on the first column name is stripped automatically.
+
+### The export returned fewer guests than expected
+
+Disabled guests and guests who never redeemed their original invitation are both
+excluded by default. Add `-IncludeDisabledGuests` and `-IncludePendingAcceptance`
+to keep them.
 
 ---
 

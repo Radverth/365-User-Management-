@@ -49,6 +49,10 @@
 .PARAMETER SkipOwnership
     Add guests as group members but never as group owners.
 
+.PARAMETER Delimiter
+    Field separator of the input CSV. Detected automatically when omitted, which
+    covers files re-saved by Excel in a locale that uses semicolons.
+
 .PARAMETER MaxGuests
     Process at most this many guests. Useful for a pilot run against a handful of
     accounts before committing to the full migration.
@@ -90,7 +94,9 @@ param(
 
     [switch]$SkipOwnership,
 
-    [int]$MaxGuests = 0
+    [int]$MaxGuests = 0,
+
+    [string]$Delimiter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +149,15 @@ function Resolve-ExternalEmail {
     return $null
 }
 
+# Shared CSV input handling - see Common/InputCsv.ps1
+$commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
+
+if (-not (Test-Path -Path $commonPath)) {
+    throw "Could not find $commonPath. Run this script from inside a full clone of the repository - it depends on the shared helper in Common/."
+}
+
+. $commonPath
+
 #endregion Helpers ------------------------------------------------------------
 
 if (-not (Test-Path -Path $InputPath)) {
@@ -151,19 +166,13 @@ if (-not (Test-Path -Path $InputPath)) {
 
 Initialize-OutputPath -Path $LogPath
 
-$rows = @(Import-Csv -Path $InputPath)
+$rows = Import-InputCsv -Path $InputPath -Delimiter $Delimiter -RequiredColumns @(
+    'ExternalEmail', 'GuestDisplayName', 'GroupDisplayName', 'MembershipType', 'Importable'
+)
 
 if ($rows.Count -eq 0) {
     Write-Host 'The input CSV contains no rows. Nothing to do.' -ForegroundColor Yellow
     return
-}
-
-$requiredColumns = @('ExternalEmail', 'GuestDisplayName', 'GroupDisplayName', 'MembershipType', 'Importable')
-$actualColumns   = $rows[0].PSObject.Properties.Name
-$missingColumns  = @($requiredColumns | Where-Object { $_ -notin $actualColumns })
-
-if ($missingColumns.Count -gt 0) {
-    throw "Input CSV is missing required column(s): $($missingColumns -join ', '). Was it produced by Export-GuestPermissions.ps1?"
 }
 
 Write-Host 'Connecting to Microsoft Graph (target tenant)...' -ForegroundColor Cyan
