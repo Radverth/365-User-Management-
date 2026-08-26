@@ -38,24 +38,85 @@
       mode to use for a whole-tenant sweep.
 #>
 
-# Cached result of the capability probe below; $null until first checked.
-$script:PnPPersistLoginSupported = $null
+# Parameter-name -> supported, filled lazily by Test-PnPParameter.
+$script:PnPParameterCache = @{}
+
+function Test-PnPParameter {
+    <#  True when the installed Connect-PnPOnline exposes the named parameter.
+        Capabilities differ between PnP.PowerShell releases, so they are probed
+        rather than assumed. #>
+    param([Parameter(Mandatory)][string]$Name)
+
+    if (-not $script:PnPParameterCache.ContainsKey($Name)) {
+
+        $supported = $false
+
+        try {
+            $command = Get-Command -Name Connect-PnPOnline -ErrorAction Stop
+
+            $supported = $command.Parameters.ContainsKey($Name)
+        }
+        catch {
+            $supported = $false
+        }
+
+        $script:PnPParameterCache[$Name] = $supported
+    }
+
+    return $script:PnPParameterCache[$Name]
+}
 
 function Test-PnPPersistLoginSupport {
     <#  True when the installed PnP.PowerShell exposes -PersistLogin. #>
 
-    if ($null -ne $script:PnPPersistLoginSupported) { return $script:PnPPersistLoginSupported }
+    return (Test-PnPParameter -Name 'PersistLogin')
+}
 
-    try {
-        $command = Get-Command -Name Connect-PnPOnline -ErrorAction Stop
+function Test-OnWindows {
+    <#  $IsWindows only exists in PowerShell 6+. Windows PowerShell 5.1 runs
+        nowhere else, so treat its absence as Windows. #>
 
-        $script:PnPPersistLoginSupported = $command.Parameters.ContainsKey('PersistLogin')
+    if ($null -ne $IsWindows) { return [bool]$IsWindows }
+
+    return $true
+}
+
+function Resolve-CertificateByThumbprint {
+    <#  Finds a certificate by thumbprint using .NET directly, which works on every
+        platform .NET supports - on Linux and macOS the CurrentUser store is backed
+        by ~/.dotnet/corefx/cryptography/x509stores. Returns $null when not found.
+
+        Thumbprints are compared with punctuation and spaces stripped, so a value
+        copied out of the Windows certificate dialog (which is space-separated and
+        may carry a leading invisible character) still matches. #>
+    param([Parameter(Mandatory)][string]$Thumbprint)
+
+    $wanted = ($Thumbprint -replace '[^0-9A-Fa-f]', '')
+
+    if (-not $wanted) { return $null }
+
+    foreach ($location in @('CurrentUser', 'LocalMachine')) {
+
+        $store = $null
+
+        try {
+            $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', $location)
+            $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+
+            foreach ($candidate in $store.Certificates) {
+                if ($candidate.Thumbprint -and $candidate.Thumbprint -eq $wanted) { return $candidate }
+            }
+        }
+        catch {
+            # A store that does not exist on this platform is not an error here.
+            continue
+        }
+        finally {
+            if ($store) { $store.Dispose() }
+        }
     }
-    catch {
-        $script:PnPPersistLoginSupported = $false
-    }
 
-    return $script:PnPPersistLoginSupported
+    return $null
 }
 
 function New-ScriptAuthContext {
@@ -71,7 +132,8 @@ function New-ScriptAuthContext {
         [switch]$NoPersistedLogin
     )
 
-    $appOnly = [bool]($Thumbprint -or $CertificatePath)
+    $appOnly     = [bool]($Thumbprint -or $CertificatePath)
+    $certificate = $null
 
     if ($appOnly) {
 
@@ -88,21 +150,34 @@ function New-ScriptAuthContext {
             throw 'Supply either -Thumbprint or -CertificatePath, not both.'
         }
 
-        # $IsWindows only exists in PowerShell 6+; Windows PowerShell 5.1 is
-        # Windows by definition, so treat its absence as Windows.
-        $onWindows = if ($null -ne $IsWindows) { $IsWindows } else { $true }
+        # PnP resolves -Thumbprint through the Windows certificate store. On Linux
+        # and macOS that lookup fails ("The specified X509 certificate store does
+        # not exist"), so resolve the certificate here and hand PnP the object.
+        if ($Thumbprint -and -not (Test-OnWindows)) {
 
-        if ($Thumbprint -and -not $onWindows) {
-            $message = [System.Text.StringBuilder]::new()
+            $resolved = Resolve-CertificateByThumbprint -Thumbprint $Thumbprint
 
-            [void]$message.AppendLine('-Thumbprint looks up the certificate in the Windows certificate store, which does not exist on Linux or macOS.')
-            [void]$message.AppendLine('')
-            [void]$message.AppendLine('  Use the .pfx that Register-PnPEntraIDApp wrote to its -OutPath instead:')
-            [void]$message.AppendLine('      -CertificatePath /path/to/yourapp.pfx')
-            [void]$message.AppendLine('')
-            [void]$message.AppendLine('  Add -CertificatePassword (Read-Host -AsSecureString) if the .pfx is protected.')
+            if (-not $resolved) {
+                $message = [System.Text.StringBuilder]::new()
 
-            throw $message.ToString()
+                [void]$message.AppendLine("No certificate with thumbprint '$Thumbprint' is available on this machine.")
+                [void]$message.AppendLine('')
+                [void]$message.AppendLine('  On Linux and macOS there is no Windows certificate store to look it up in.')
+                [void]$message.AppendLine('  Point at the .pfx that Register-PnPEntraIDApp wrote to its -OutPath instead:')
+                [void]$message.AppendLine('      -CertificatePath /path/to/yourapp.pfx')
+                [void]$message.AppendLine('')
+                [void]$message.AppendLine('  Add -CertificatePassword (Read-Host -AsSecureString) if the .pfx is protected.')
+                [void]$message.AppendLine('  -CertificatePath works on Windows too, so it is the portable choice for a')
+                [void]$message.AppendLine('  script that has to run on both.')
+
+                throw $message.ToString()
+            }
+
+            if (-not (Test-PnPParameter -Name 'Certificate')) {
+                throw "This version of PnP.PowerShell cannot accept a certificate object, which is how -Thumbprint is supported on Linux and macOS. Use -CertificatePath with the .pfx instead, or run 'Update-Module PnP.PowerShell'."
+            }
+
+            $certificate = $resolved
         }
 
         if ($CertificatePath -and -not (Test-Path -Path $CertificatePath)) {
@@ -112,6 +187,7 @@ function New-ScriptAuthContext {
 
     [PSCustomObject]@{
         AppOnly             = $appOnly
+        Certificate         = $certificate
         ClientId            = $ClientId
         Tenant              = $Tenant
         Thumbprint          = $Thumbprint
@@ -140,7 +216,11 @@ function Connect-ScriptSite {
 
         $params['Tenant'] = $Auth.Tenant
 
-        if ($Auth.Thumbprint) {
+        if ($Auth.Certificate) {
+            # Resolved by us because this platform has no Windows certificate store.
+            $params['Certificate'] = $Auth.Certificate
+        }
+        elseif ($Auth.Thumbprint) {
             $params['Thumbprint'] = $Auth.Thumbprint
         }
         else {

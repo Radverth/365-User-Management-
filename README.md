@@ -108,10 +108,12 @@ Both SharePoint scripts take `-Tenant` with either `-Thumbprint` or
 certificate is what switches the script to app-only — there is no separate mode
 switch. Nothing prompts, so this also suits scheduled runs.
 
-**On Linux or macOS, use `-CertificatePath`, not `-Thumbprint`.** A thumbprint is
-looked up in the Windows certificate store, which does not exist on other
-platforms — PnP fails with *"The specified X509 certificate store does not
-exist"*. Point at the `.pfx` that `-OutPath` produced instead:
+#### Windows, Linux and macOS
+
+Both forms work on all three platforms.
+
+`-CertificatePath` is the portable choice, and the one to use in anything shared
+between machines — a `.pfx` behaves identically everywhere:
 
 ```powershell
 .\Get-SiteOwners.ps1 -AllSites `
@@ -122,7 +124,25 @@ exist"*. Point at the `.pfx` that `-OutPath` produced instead:
 ```
 
 Add `-CertificatePassword (Read-Host -AsSecureString)` if the .pfx is protected.
-The scripts check this before connecting and say so.
+
+`-Thumbprint` also works everywhere, but the certificate has to be installed on
+the machine. PnP resolves a thumbprint through the Windows certificate store, which
+does not exist elsewhere — on Linux and macOS the scripts look it up through .NET
+instead (where the CurrentUser store lives under
+`~/.dotnet/corefx/cryptography/x509stores`) and hand PnP the resolved certificate.
+Spaces and punctuation are stripped first, so a thumbprint copied out of the
+Windows certificate dialog matches as-is.
+
+If the thumbprint is not installed, the error says so and points at
+`-CertificatePath`. To install a .pfx on Linux or macOS:
+
+```powershell
+$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor
+         [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+$cert  = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new('./yourapp.pfx', '', $flags)
+$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My','CurrentUser')
+$store.Open('ReadWrite'); $store.Add($cert); $store.Dispose()
+```
 
 `Sites.FullControl.All` is full write access to every site in the tenant, held by a
 certificate on disk. Treat it accordingly: it is worth deleting the app registration
@@ -448,9 +468,11 @@ Two ways to get the SharePoint group detail as well:
 
 ### "The specified X509 certificate store does not exist"
 
-You passed `-Thumbprint` on Linux or macOS. The Windows certificate store does not
-exist there. Use `-CertificatePath` with the `.pfx` file instead — see
-[App-only access to every site](#app-only-access-to-every-site-optional).
+An older copy of the scripts passed `-Thumbprint` straight to PnP, which resolves it
+through the Windows certificate store. Current versions resolve it through .NET on
+Linux and macOS instead, so update your clone. If the certificate simply is not
+installed on the machine, use `-CertificatePath` with the `.pfx` — see
+[Windows, Linux and macOS](#windows-linux-and-macos).
 
 ### Owner names are blank on Microsoft 365 group rows
 
