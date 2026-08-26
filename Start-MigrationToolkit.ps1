@@ -560,7 +560,7 @@ function Invoke-CheckSetup {
 
         foreach ($file in $missingFiles) { Write-Host "     $file" -ForegroundColor Red }
 
-        Write-Host '   Re-download or re-clone the repository - the scripts share files in Common/.' -ForegroundColor Yellow
+        Write-Host '   Ask for a complete copy of the toolkit folder - the scripts share files in Common/.' -ForegroundColor Yellow
     }
 
     $missingModules = @($modules | Where-Object { -not $_.Installed } | Select-Object -ExpandProperty Name)

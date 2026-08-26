@@ -153,7 +153,7 @@ function Resolve-ExternalEmail {
 $commonPath = Join-Path -Path $PSScriptRoot -ChildPath '..\Common\InputCsv.ps1'
 
 if (-not (Test-Path -Path $commonPath)) {
-    throw "Could not find $commonPath. Run this script from inside a full clone of the repository - it depends on the shared helper in Common/."
+    throw "Could not find $commonPath. Run this script from inside the complete toolkit folder - it depends on the shared helper in Common/."
 }
 
 . $commonPath

@@ -9,9 +9,9 @@ Every script writes its results to CSV and the ones that change anything support
 ## Start here
 
 **New to this, or handing it to someone who is?** Read the
-[user guide](docs/user-guide.html) — a step-by-step runbook written for
-administrators who know Microsoft 365 but not PowerShell. Open it in a browser,
-or view the published copy your team was sent.
+[user guide](docs/USER-GUIDE.md) — a step-by-step runbook written for
+administrators who know Microsoft 365 but not PowerShell. It assumes the toolkit
+folder was handed to them, so it is safe to pass on as-is.
 
 If you would rather answer questions than remember parameters:
 
@@ -43,7 +43,8 @@ run directly.
 
 `Common/` holds shared helpers the other scripts dot-source (`InputCsv.ps1` for CSV
 input, `PnPConnect.ps1` for SharePoint sign-in). Keep the folder structure intact —
-running a script from outside a full clone will fail with a message telling you so.
+running a script from outside the complete folder will fail with a message telling
+you so.
 
 ---
 
@@ -573,7 +574,8 @@ Two ways to get the SharePoint group detail as well:
 
 An older copy of the scripts passed `-Thumbprint` straight to PnP, which resolves it
 through the Windows certificate store. Current versions resolve it through .NET on
-Linux and macOS instead, so update your clone. If the certificate simply is not
+Linux and macOS instead, so update to a current copy of the toolkit. If the
+certificate simply is not
 installed on the machine, use `-CertificatePath` with the `.pfx` — see
 [Windows, Linux and macOS](#windows-linux-and-macos).
 
