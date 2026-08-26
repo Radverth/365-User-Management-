@@ -88,6 +88,23 @@ function New-ScriptAuthContext {
             throw 'Supply either -Thumbprint or -CertificatePath, not both.'
         }
 
+        # $IsWindows only exists in PowerShell 6+; Windows PowerShell 5.1 is
+        # Windows by definition, so treat its absence as Windows.
+        $onWindows = if ($null -ne $IsWindows) { $IsWindows } else { $true }
+
+        if ($Thumbprint -and -not $onWindows) {
+            $message = [System.Text.StringBuilder]::new()
+
+            [void]$message.AppendLine('-Thumbprint looks up the certificate in the Windows certificate store, which does not exist on Linux or macOS.')
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  Use the .pfx that Register-PnPEntraIDApp wrote to its -OutPath instead:')
+            [void]$message.AppendLine('      -CertificatePath /path/to/yourapp.pfx')
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  Add -CertificatePassword (Read-Host -AsSecureString) if the .pfx is protected.')
+
+            throw $message.ToString()
+        }
+
         if ($CertificatePath -and -not (Test-Path -Path $CertificatePath)) {
             throw "Certificate file not found: $CertificatePath"
         }

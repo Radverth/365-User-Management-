@@ -108,6 +108,22 @@ Both SharePoint scripts take `-Tenant` with either `-Thumbprint` or
 certificate is what switches the script to app-only — there is no separate mode
 switch. Nothing prompts, so this also suits scheduled runs.
 
+**On Linux or macOS, use `-CertificatePath`, not `-Thumbprint`.** A thumbprint is
+looked up in the Windows certificate store, which does not exist on other
+platforms — PnP fails with *"The specified X509 certificate store does not
+exist"*. Point at the `.pfx` that `-OutPath` produced instead:
+
+```powershell
+.\Get-SiteOwners.ps1 -AllSites `
+    -TenantAdminUrl https://contoso-admin.sharepoint.com `
+    -ClientId <app id> `
+    -Tenant contoso.onmicrosoft.com `
+    -CertificatePath ./PnPMigrationAppOnly.pfx
+```
+
+Add `-CertificatePassword (Read-Host -AsSecureString)` if the .pfx is protected.
+The scripts check this before connecting and say so.
+
 `Sites.FullControl.All` is full write access to every site in the tenant, held by a
 certificate on disk. Treat it accordingly: it is worth deleting the app registration
 once the migration is finished. If you only need the owners report and would rather
@@ -429,6 +445,12 @@ Two ways to get the SharePoint group detail as well:
   authenticates as itself with `Sites.FullControl.All` and reaches every site.
 - **Make yourself a site collection administrator** on the sites you care about
   (SharePoint admin centre, or `Set-PnPTenantSite -Owners`) and re-run.
+
+### "The specified X509 certificate store does not exist"
+
+You passed `-Thumbprint` on Linux or macOS. The Windows certificate store does not
+exist there. Use `-CertificatePath` with the `.pfx` file instead — see
+[App-only access to every site](#app-only-access-to-every-site-optional).
 
 ### Owner names are blank on Microsoft 365 group rows
 
