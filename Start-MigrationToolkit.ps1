@@ -446,55 +446,179 @@ function Get-OutputPath {
 
 #region Tasks -----------------------------------------------------------------
 
+# The submodules the scripts' #Requires lines actually name. Installing these is
+# far quicker than the Microsoft.Graph meta-module, which pulls in around forty.
+$script:RequiredModules = @(
+    @{ Name = 'Microsoft.Graph.Users';                        For = 'guest scripts' }
+    @{ Name = 'Microsoft.Graph.Groups';                       For = 'guest scripts' }
+    @{ Name = 'Microsoft.Graph.Identity.SignIns';             For = 'guest import (invitations)' }
+    @{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; For = 'guest export' }
+    @{ Name = 'PnP.PowerShell';                               For = 'SharePoint scripts' }
+)
+
+function Get-ModuleStatus {
+    <#  One row per required module, with the installed version when present. #>
+
+    foreach ($required in $script:RequiredModules) {
+
+        $found = Get-Module -ListAvailable -Name $required.Name |
+                    Sort-Object Version -Descending |
+                    Select-Object -First 1
+
+        [PSCustomObject]@{
+            Name      = $required.Name
+            For       = $required.For
+            Installed = [bool]$found
+            Version   = if ($found) { "$($found.Version)" } else { '' }
+        }
+    }
+}
+
+function Install-MissingModules {
+    <#  Installs into the current user's module path, so no administrator rights are
+        needed. Returns the names that are still missing afterwards. #>
+    param([Parameter(Mandatory)][string[]]$Names)
+
+    Write-Host ''
+    Write-Explain @(
+        'These come from the PowerShell Gallery, Microsoft''s public module',
+        'repository. They install for your user account only, so no administrator',
+        'rights are needed.',
+        '',
+        'This can take a few minutes.'
+    )
+
+    $repository = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+
+    if ($repository -and $repository.InstallationPolicy -ne 'Trusted') {
+        Write-Host '   The PowerShell Gallery is marked untrusted on this machine, so the' -ForegroundColor DarkGray
+        Write-Host '   install is run with -Force to avoid a prompt for each module.' -ForegroundColor DarkGray
+        Write-Host ''
+    }
+
+    foreach ($name in $Names) {
+
+        Write-Host "   Installing $name ..." -ForegroundColor Cyan
+
+        try {
+            Install-Module -Name $name -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+
+            Write-Host "     done" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "     failed: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "     Try it by hand: Install-Module $name -Scope CurrentUser" -ForegroundColor Yellow
+        }
+    }
+
+    Write-Host ''
+
+    return @(Get-ModuleStatus | Where-Object { -not $_.Installed -and $_.Name -in $Names } |
+                Select-Object -ExpandProperty Name)
+}
+
 function Invoke-CheckSetup {
 
     Write-Banner 'Check what is installed'
 
-    $results = @()
+    $modules = @(Get-ModuleStatus)
 
-    foreach ($module in @('Microsoft.Graph', 'PnP.PowerShell')) {
-
-        $found = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
-
-        $results += [PSCustomObject]@{
-            Component = $module
-            Status    = if ($found) { "installed (v$($found.Version))" } else { 'MISSING' }
-            Fix       = if ($found) { '' } else { "Install-Module $module -Scope CurrentUser" }
+    $rows = foreach ($module in $modules) {
+        [PSCustomObject]@{
+            Component = $module.Name
+            Status    = if ($module.Installed) { "v$($module.Version)" } else { 'MISSING' }
+            Needed_by = $module.For
         }
     }
 
+    $rows | Format-Table -AutoSize | Out-String -Width 100 | Write-Host
+
     $psVersion = $PSVersionTable.PSVersion
 
-    $results += [PSCustomObject]@{
-        Component = 'PowerShell'
-        Status    = "v$psVersion"
-        Fix       = if ($psVersion.Major -lt 7) { 'PowerShell 7 or later is recommended' } else { '' }
+    if ($psVersion.Major -lt 7) {
+        Write-Host "   PowerShell is v$psVersion. Version 7 or later is recommended." -ForegroundColor Yellow
     }
+    else {
+        Write-Host "   PowerShell v$psVersion - fine." -ForegroundColor Green
+    }
+
+    # The scripts dot-source shared helpers, so a partial copy fails confusingly.
+    $missingFiles = @()
 
     foreach ($relative in @('Guests/Export-GuestPermissions.ps1', 'Guests/Import-GuestPermissions.ps1',
                             'SharePoint/Get-SiteOwners.ps1', 'SharePoint/Set-SiteMembersToViewers.ps1',
                             'Setup/New-AppOnlyCertificate.ps1', 'Common/InputCsv.ps1', 'Common/PnPConnect.ps1')) {
 
-        $path = Join-Path -Path $script:Root -ChildPath $relative
-
-        $results += [PSCustomObject]@{
-            Component = $relative
-            Status    = if (Test-Path -Path $path) { 'present' } else { 'MISSING' }
-            Fix       = if (Test-Path -Path $path) { '' } else { 'Re-download or re-clone the repository' }
-        }
+        if (-not (Test-Path -Path (Join-Path -Path $script:Root -ChildPath $relative))) { $missingFiles += $relative }
     }
 
-    $results | Format-Table -AutoSize | Out-String -Width 100 | Write-Host
-
-    $missing = @($results | Where-Object { $_.Status -like '*MISSING*' -or $_.Fix })
-
-    if ($missing.Count -eq 0) {
-        Write-Host '   Everything needed is in place.' -ForegroundColor Green
+    if ($missingFiles.Count -eq 0) {
+        Write-Host '   All toolkit files present.' -ForegroundColor Green
     }
     else {
-        Write-Host '   Some things need attention:' -ForegroundColor Yellow
+        Write-Host '   Some toolkit files are missing:' -ForegroundColor Red
 
-        foreach ($item in $missing) { Write-Host "     $($item.Component): $($item.Fix)" -ForegroundColor Yellow }
+        foreach ($file in $missingFiles) { Write-Host "     $file" -ForegroundColor Red }
+
+        Write-Host '   Re-download or re-clone the repository - the scripts share files in Common/.' -ForegroundColor Yellow
+    }
+
+    $missingModules = @($modules | Where-Object { -not $_.Installed } | Select-Object -ExpandProperty Name)
+
+    if ($missingModules.Count -eq 0) {
+
+        Write-Host '   All required modules are installed.' -ForegroundColor Green
+        Write-Host ''
+
+        # An older PnP has no -PersistLogin, which means a sign-in prompt at every
+        # single site. Worth offering, but not worth churning if it is already fine.
+        if (Read-YesNo -Prompt '   Update PnP.PowerShell to the latest version? (older versions ask you to sign in at every site)' -Default $false) {
+
+            Write-Host '   Updating PnP.PowerShell ...' -ForegroundColor Cyan
+
+            try {
+                Update-Module -Name PnP.PowerShell -Force -ErrorAction Stop
+                Write-Host '     done' -ForegroundColor Green
+            }
+            catch {
+                Write-Host "     failed: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host '     Try it by hand: Update-Module PnP.PowerShell' -ForegroundColor Yellow
+            }
+        }
+
+        Write-Host ''
+        return
+    }
+
+    Write-Host ''
+    Write-Host "   $($missingModules.Count) module(s) need installing:" -ForegroundColor Yellow
+
+    foreach ($name in $missingModules) { Write-Host "     $name" -ForegroundColor Yellow }
+
+    Write-Host ''
+
+    if (-not (Read-YesNo -Prompt '   Install them now?' -Default $true)) {
+
+        Write-Host ''
+        Write-Host '   Nothing installed. To do it yourself:' -ForegroundColor Yellow
+
+        foreach ($name in $missingModules) {
+            Write-Host "     Install-Module $name -Scope CurrentUser" -ForegroundColor Yellow
+        }
+
+        Write-Host ''
+        return
+    }
+
+    $stillMissing = Install-MissingModules -Names $missingModules
+
+    if ($stillMissing.Count -eq 0) {
+        Write-Host '   All required modules are now installed.' -ForegroundColor Green
+    }
+    else {
+        Write-Host '   Still missing after the attempt:' -ForegroundColor Red
+
+        foreach ($name in $stillMissing) { Write-Host "     $name" -ForegroundColor Red }
     }
 
     Write-Host ''
@@ -749,7 +873,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Key = 'owners';  Label = 'Report who owns your SharePoint sites';    Detail = 'Creates a spreadsheet. Changes nothing.' }
         @{ Key = 'viewers'; Label = 'Change site members to view-only';         Detail = 'Makes changes. Previewed first.' }
         @{ Key = 'cert';    Label = 'Set up a certificate for full site access'; Detail = 'Do this once, if you need every site.' }
-        @{ Key = 'check';   Label = 'Check that everything is installed' }
+        @{ Key = 'check';   Label = 'Check and install what is needed'; Detail = 'Offers to install any missing PowerShell modules.' }
         @{ Key = 'quit';    Label = 'Quit' }
     )
 

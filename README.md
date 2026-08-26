@@ -44,10 +44,24 @@ running a script from outside a full clone will fail with a message telling you 
 
 ## Prerequisites
 
+Run `./Start-MigrationToolkit.ps1` and choose **Check and install what is needed** —
+it lists what is missing and offers to install it for you, into your own user
+account, so no administrator rights are needed.
+
+To do it by hand, the scripts need these specific Graph submodules rather than the
+whole `Microsoft.Graph` meta-module, which is around forty modules and far slower
+to install:
+
 ```powershell
-Install-Module Microsoft.Graph -Scope CurrentUser      # guest scripts
-Install-Module PnP.PowerShell  -Scope CurrentUser      # SharePoint scripts
+Install-Module Microsoft.Graph.Users                        -Scope CurrentUser
+Install-Module Microsoft.Graph.Groups                       -Scope CurrentUser
+Install-Module Microsoft.Graph.Identity.SignIns             -Scope CurrentUser  # guest invitations
+Install-Module Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser  # guest export
+Install-Module PnP.PowerShell                               -Scope CurrentUser  # SharePoint scripts
 ```
+
+`Install-Module Microsoft.Graph -Scope CurrentUser` also works and covers all four
+submodules, if you would rather have the lot.
 
 All scripts sign in interactively and support MFA. The two SharePoint scripts also
 accept certificate-based app-only sign-in, which is the only way to reach every site
