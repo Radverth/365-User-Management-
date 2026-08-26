@@ -74,6 +74,10 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $BaseName) { $BaseName = ($CommonName -replace '[^\w\-]', '') }
 
+# Cleared if -Install cannot be confirmed, so the guidance printed at the end does
+# not recommend -Thumbprint when it will not work.
+$script:InstallVerified = $true
+
 if (-not (Test-Path -Path $OutPath)) {
     New-Item -ItemType Directory -Path $OutPath -Force | Out-Null
 }
@@ -158,12 +162,33 @@ try {
             $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser')
             $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
             $store.Add($installable)
+            $store.Close()
 
-            Write-Host '  Installed into the CurrentUser certificate store.' -ForegroundColor Green
+            # Add can succeed without the certificate becoming findable afterwards -
+            # a read-only or redirected store, or a different HOME under sudo. Read
+            # it back rather than reporting success on faith.
+            $verify = [System.Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser')
+            $verify.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+
+            try {
+                $installed = @($verify.Certificates | Where-Object { $_.Thumbprint -eq $certificate.Thumbprint }).Count -gt 0
+            }
+            finally {
+                $verify.Dispose()
+            }
+
+            if ($installed) {
+                Write-Host '  Installed into the CurrentUser certificate store, and verified readable.' -ForegroundColor Green
+            }
+            else {
+                Write-Warning 'The certificate store accepted the certificate but cannot read it back, so -Thumbprint will not find it. Use -CertificatePath with the .pfx instead.'
+                $script:InstallVerified = $false
+            }
         }
         catch {
             Write-Warning "Could not install into the certificate store: $($_.Exception.Message)"
             Write-Warning 'Use -CertificatePath with the .pfx instead of -Thumbprint.'
+            $script:InstallVerified = $false
         }
         finally {
             if ($store) { $store.Dispose() }
@@ -189,9 +214,9 @@ Write-Host '       -> Certificates -> Upload certificate'
 Write-Host ''
 Write-Host '  2. Run the SharePoint scripts against it:'
 
-if ($Install) {
+if ($Install -and $script:InstallVerified) {
     Write-Host "       -ClientId <app id> -Tenant <tenant>.onmicrosoft.com -Thumbprint $($certificate.Thumbprint)"
-    Write-Host "     or, needing nothing installed:"
+    Write-Host '     or, needing nothing installed:'
 }
 
 Write-Host "       -ClientId <app id> -Tenant <tenant>.onmicrosoft.com -CertificatePath $pfxPath"
