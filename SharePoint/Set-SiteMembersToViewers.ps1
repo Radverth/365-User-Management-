@@ -43,6 +43,13 @@
     Also demote security groups and Microsoft 365 groups that appear as principals
     inside the Members group. Off by default; they are reported instead.
 
+    On a Microsoft 365 group-connected site this is the important one. The Members
+    group holds the connected group's member claim (shown in the UI as
+    "<Site> Members"), so moving that single principal to Visitors demotes everyone
+    in the team to read-only on the site at once - including people added to the
+    group later. Microsoft 365 group membership itself is not touched, so Teams
+    chat, the group mailbox and the calendar are unaffected.
+
 .PARAMETER GuestLoginPattern
     Regex that identifies a guest by login name. The default matches both B2B
     guests (#ext#) and SharePoint-only external users (urn:spo:guest).
@@ -356,8 +363,15 @@ foreach ($site in $sites) {
             continue
         }
 
+        # An unknown principal type is treated as a user, so the guests-only default
+        # still protects staff rather than falling through to the group branch.
+        $isUserPrincipal = (-not $type) -or ($type -eq 'User')
+
         # Nested groups are principals too; demoting one moves everyone inside it.
-        if ($type -and $type -ne 'User' -and -not $IncludeSecurityGroups) {
+        # On a Microsoft 365 group-connected site the Members group holds the
+        # group's member claim, so this is the principal that governs the whole
+        # team's access to the site.
+        if (-not $isUserPrincipal -and -not $IncludeSecurityGroups) {
             Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
                          -IsGuest $guest -Status 'Skipped' `
                          -Detail "Principal is a $type, not a user. Use -IncludeSecurityGroups to include it."
@@ -365,7 +379,9 @@ foreach ($site in $sites) {
             continue
         }
 
-        if (-not $guest -and -not $IncludeInternalUsers) {
+        # Guest versus internal only means anything for an actual user. A group is
+        # neither, so gating it on -IncludeInternalUsers as well would be wrong.
+        if ($isUserPrincipal -and -not $guest -and -not $IncludeInternalUsers) {
             Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
                          -IsGuest $guest -Status 'Skipped' `
                          -Detail 'Internal user. Use -IncludeInternalUsers to include internal staff.'

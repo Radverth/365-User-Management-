@@ -331,6 +331,7 @@ cd SharePoint
 |---|---|---|
 | `-IncludeInternalUsers` | off | Also demote internal (non-guest) users. |
 | `-IncludeSecurityGroups` | off | Also demote security groups sitting in the Members group. Reported otherwise. |
+| | | On a group-connected site this is the one that matters — see below. |
 | `-ExcludeLogin` | empty | Login names or emails to leave alone. Protects service accounts. |
 | `-RemoveFromMembers` | `$true` | Set `-RemoveFromMembers:$false` to copy into Visitors without removing from Members. |
 | `-GuestLoginPattern` | `(#ext#\|urn:spo:guest)` | Regex identifying a guest by login name. |
@@ -342,6 +343,26 @@ the removal is skipped and the failure is logged.
 
 Re-running is safe: anyone already in Visitors is not re-added, and anyone already
 out of Members is not touched.
+
+#### Demoting a whole team at once
+
+On a Microsoft 365 group-connected site, the Members SharePoint group usually holds
+just two kinds of principal: the connected group's **member claim** (shown in the
+admin UI as "<Site> Members") and any individuals added directly.
+
+The claim is the one that matters. Moving that single principal to Visitors demotes
+everyone in the team to read-only on the site in one step — including anyone added
+to the group later — while leaving Microsoft 365 group membership alone, so Teams
+chat, the group mailbox and the calendar are unaffected.
+
+It is a group rather than a user, so it needs `-IncludeSecurityGroups`. Individuals
+listed alongside it are separate: guests move by default, internal staff need
+`-IncludeInternalUsers`. To clear the Members group completely:
+
+```powershell
+.\Set-SiteMembersToViewers.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Team `
+    -IncludeSecurityGroups -IncludeInternalUsers -WhatIf
+```
 
 #### Microsoft 365 group-connected (Teams) sites
 
