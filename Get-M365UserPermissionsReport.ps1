@@ -3,10 +3,10 @@
 # Define export path
 $ExportPath = "M365_User_Permissions_Report.csv"
 
-# Ensure the parent directory exists
+# Ensure the parent directory exists (bare file names have no parent)
 $ParentDir = Split-Path -Path $ExportPath -Parent
 
-if (-not (Test-Path -Path $ParentDir)) {
+if ($ParentDir -and -not (Test-Path -Path $ParentDir)) {
     New-Item -ItemType Directory -Path $ParentDir -Force | Out-Null
 }
 
@@ -21,11 +21,14 @@ Connect-MgGraph -Scopes `
 # Retrieve all users
 Write-Host "Retrieving users..." -ForegroundColor Cyan
 
-$Users = Get-MgUser `
-    -All `
-    -Property Id,DisplayName,UserPrincipalName,Mail,AccountEnabled,UserType
+# Wrap in @() so a single-user tenant still yields a countable array
+$Users = @(
+    Get-MgUser `
+        -All `
+        -Property Id,DisplayName,UserPrincipalName,Mail,AccountEnabled,UserType
+)
 
-if (-not $Users) {
+if ($Users.Count -eq 0) {
     Write-Host "No users found in the tenant." -ForegroundColor Yellow
     Disconnect-MgGraph
     return
@@ -35,6 +38,9 @@ Write-Host "Found $($Users.Count) users. Fetching memberships..." -ForegroundCol
 
 # Create report collection
 $Report = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+# Cache group lookups so each group is only fetched from Graph once
+$GroupCache = @{}
 
 $Counter = 0
 
@@ -56,47 +62,67 @@ foreach ($User in $Users) {
             -ErrorAction Stop
 
         # Keep only groups
-        $GroupMemberships = $Memberships | Where-Object {
-            $_.ODataType -eq "#microsoft.graph.group" -or
-            $_.AdditionalProperties["@odata.type"] -eq "#microsoft.graph.group"
-        }
+        $GroupMemberships = @(
+            $Memberships | Where-Object {
+                $_.ODataType -eq "#microsoft.graph.group" -or
+                $_.AdditionalProperties["@odata.type"] -eq "#microsoft.graph.group"
+            }
+        )
 
-        if ($GroupMemberships) {
+        if ($GroupMemberships.Count -gt 0) {
 
             foreach ($Group in $GroupMemberships) {
 
-                try {
+                if ($GroupCache.ContainsKey($Group.Id)) {
 
-                    $GroupDetails = Get-MgGroup `
-                        -GroupId $Group.Id `
-                        -Property Id,DisplayName,GroupTypes,SecurityEnabled `
-                        -ErrorAction Stop
+                    $CachedGroup = $GroupCache[$Group.Id]
 
-                    $GroupName = $GroupDetails.DisplayName
-                    $GroupId   = $GroupDetails.Id
-
-                    if ($GroupDetails.GroupTypes -contains "Unified") {
-                        $GroupType = "Microsoft 365 Group / Team"
-                    }
-                    elseif ($GroupDetails.SecurityEnabled -eq $true) {
-                        $GroupType = "Security Group"
-                    }
-                    else {
-                        $GroupType = "Distribution Group"
-                    }
+                    $GroupName = $CachedGroup.GroupName
+                    $GroupId   = $CachedGroup.GroupId
+                    $GroupType = $CachedGroup.GroupType
 
                 }
-                catch {
+                else {
 
-                    $GroupName = if ($Group.AdditionalProperties["displayName"]) {
-                        $Group.AdditionalProperties["displayName"]
+                    try {
+
+                        $GroupDetails = Get-MgGroup `
+                            -GroupId $Group.Id `
+                            -Property Id,DisplayName,GroupTypes,SecurityEnabled `
+                            -ErrorAction Stop
+
+                        $GroupName = $GroupDetails.DisplayName
+                        $GroupId   = $GroupDetails.Id
+
+                        if ($GroupDetails.GroupTypes -contains "Unified") {
+                            $GroupType = "Microsoft 365 Group / Team"
+                        }
+                        elseif ($GroupDetails.SecurityEnabled -eq $true) {
+                            $GroupType = "Security Group"
+                        }
+                        else {
+                            $GroupType = "Distribution Group"
+                        }
+
                     }
-                    else {
-                        $Group.Id
+                    catch {
+
+                        $GroupName = if ($Group.AdditionalProperties["displayName"]) {
+                            $Group.AdditionalProperties["displayName"]
+                        }
+                        else {
+                            $Group.Id
+                        }
+
+                        $GroupId   = $Group.Id
+                        $GroupType = "Unknown Group Type"
                     }
 
-                    $GroupId   = $Group.Id
-                    $GroupType = "Unknown Group Type"
+                    $GroupCache[$Group.Id] = [PSCustomObject]@{
+                        GroupName = $GroupName
+                        GroupId   = $GroupId
+                        GroupType = $GroupType
+                    }
                 }
 
                 $Report.Add([PSCustomObject]@{
@@ -131,6 +157,8 @@ foreach ($User in $Users) {
     }
 }
 
+Write-Progress -Activity "Processing Users" -Completed
+
 # Export report
 Write-Host "Exporting report..." -ForegroundColor Green
 
@@ -142,7 +170,7 @@ $Report |
         -Encoding UTF8
 
 Write-Host "Report exported to:" -ForegroundColor Green
-Write-Host $ExportPath -ForegroundColor Green
+Write-Host (Resolve-Path -Path $ExportPath).Path -ForegroundColor Green
 
 # Disconnect
 Disconnect-MgGraph
