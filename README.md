@@ -39,7 +39,7 @@ Register-PnPEntraIDAppForInteractiveLogin `
     -ApplicationName "PnP Migration" `
     -Tenant contoso.onmicrosoft.com `
     -SharePointDelegatePermissions "AllSites.FullControl" `
-    -GraphDelegatePermissions "Group.Read.All"
+    -GraphDelegatePermissions "Group.Read.All","User.Read.All"
 ```
 
 A browser opens for you to sign in and consent. Note the client ID it prints and
@@ -55,9 +55,9 @@ The permission parameters above are optional but worth setting. Left off, the
 default grant is `AllSites.FullControl`, `Group.ReadWrite.All`,
 `User.ReadWrite.All` and `TermStore.ReadWrite.All` — more than these scripts need.
 `AllSites.FullControl` covers everything the SharePoint scripts do, and
-`Group.Read.All` is only there so `Get-SiteOwners.ps1` can read Microsoft 365 group
-owners. Neither script modifies Microsoft 365 groups, so the read-only Graph scope
-is enough.
+`Group.Read.All` and `User.Read.All` are only there so `Get-SiteOwners.ps1` can read
+Microsoft 365 group owners and resolve their names. Neither script modifies
+Microsoft 365 groups, so read-only Graph scopes are enough.
 
 Registration needs an account that can create and consent app registrations —
 Application Administrator or Global Administrator.
@@ -287,8 +287,16 @@ each owner is one row tagged with its `OwnerSource`:
 | `OwnersGroup` | Members of the site's associated Owners SharePoint group. |
 | `Microsoft365GroupOwner` | Owners of the connected Microsoft 365 group. These are site owners even when the Owners group looks empty. |
 | `TenantSiteOwner` | The site collection's primary owner from the tenant listing. `-AllSites` only. |
+| `OrphanedGroup` | The site is group-connected but the group no longer exists, so it has no owners to inherit. Needs a new owner. |
 
-Guest owners are flagged in the `IsGuest` column and counted in the summary. Each
+Guest owners are flagged in the `IsGuest` column and counted in the summary.
+
+Two kinds of noise are removed by default and counted in the summary: the
+`SHAREPOINT\system` account, which is never a person, and the tenant-wide Global
+Administrator / SharePoint Administrator role claims, which appear as site
+collection administrators on most sites and are identical everywhere. Pass
+`-IncludeSystemPrincipals` to keep them. Duplicate rows for the same owner on the
+same site are collapsed. Each
 source can be turned off with `-IncludeSiteCollectionAdmins:$false`,
 `-IncludeOwnersGroup:$false` or `-IncludeMicrosoft365GroupOwners:$false`.
 
@@ -353,6 +361,30 @@ Update-Module PnP.PowerShell
 
 The scripts warn at startup when the installed version lacks it. See
 [Signing in once instead of once per site](#signing-in-once-instead-of-once-per-site).
+
+### Owner report rows say "Attempted to perform an unauthorized operation"
+
+Expected on any site where you are not a site collection administrator — being
+SharePoint Administrator does not grant that automatically. Only the
+`SiteCollectionAdmin` and `OwnersGroup` sources need site access; the other sources
+still work, so those sites are not blank:
+
+- Group-connected sites still report their real owners via
+  `Microsoft365GroupOwner`, read through Graph rather than from inside the site.
+  For a Teams site those *are* the owners, so nothing is actually missing.
+- Other sites still report `TenantSiteOwner` from the tenant listing.
+
+If you need the SharePoint group detail as well, add yourself as a site collection
+administrator on those sites (SharePoint admin centre, or `Set-PnPTenantSite
+-Owners`) and re-run.
+
+### Owner names are blank on Microsoft 365 group rows
+
+Fixed in the script. `Get-PnPMicrosoft365GroupOwner` returns only the directory
+object ID and leaves `DisplayName`, `UserPrincipalName` and `Mail` empty
+([pnp/powershell#5069](https://github.com/pnp/powershell/issues/5069)), so the
+script uses `Get-PnPMicrosoft365Group -IncludeOwners` instead. If a row still shows
+only a GUID, its `Note` says so — grant the app `User.Read.All`.
 
 ### The export returned fewer guests than expected
 

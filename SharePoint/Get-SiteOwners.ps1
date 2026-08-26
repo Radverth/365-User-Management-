@@ -61,6 +61,12 @@
 .PARAMETER Delimiter
     Field separator of -SitesCsvPath. Detected automatically when omitted.
 
+.PARAMETER IncludeSystemPrincipals
+    Keep principals that are not real owners: the SHAREPOINT\system account, and
+    the tenant-wide Global Administrator / SharePoint Administrator role claims
+    that appear as site collection administrators on most sites. Excluded by
+    default, and the number removed is reported at the end.
+
 .PARAMETER NoPersistedLogin
     Sign in afresh for every site instead of reusing a cached token. Only needed
     when you must connect as different accounts, or to work around a stale token.
@@ -104,7 +110,9 @@ param(
 
     [string]$Delimiter,
 
-    [switch]$NoPersistedLogin
+    [switch]$NoPersistedLogin,
+
+    [switch]$IncludeSystemPrincipals
 )
 
 $ErrorActionPreference = 'Stop'
@@ -216,6 +224,12 @@ Write-Host ''
 
 $report = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+# Duplicate suppression and the per-site tally of real owner rows, both maintained
+# by Add-OwnerRow.
+$script:SeenOwnerRows           = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:SiteOwnerRowCount       = 0
+$script:FilteredSystemPrincipals = 0
+
 function Add-OwnerRow {
     param(
         [Parameter(Mandatory)][string]$Site,
@@ -230,6 +244,24 @@ function Add-OwnerRow {
         [string]$IsGuest,
         [string]$Note = ''
     )
+
+    # SHAREPOINT\system is never a person, and the tenant admin role claims are
+    # identical on every site - both bury the real owners.
+    if (-not $IncludeSystemPrincipals -and $OwnerLogin) {
+
+        if ($OwnerLogin -eq 'SHAREPOINT\system' -or $OwnerLogin -like 'c:0t.c|tenant|*') {
+            $script:FilteredSystemPrincipals++
+            return
+        }
+    }
+
+    # The same owner can surface more than once per site - a group listed by two
+    # sources, or a repeated Graph page.
+    $key = "$Site|$Source|$OwnerLogin|$OwnerName|$Note"
+
+    if (-not $script:SeenOwnerRows.Add($key)) { return }
+
+    if ($OwnerName -or $OwnerLogin) { $script:SiteOwnerRowCount++ }
 
     $report.Add([PSCustomObject]@{
         SiteUrl          = $Site
@@ -267,7 +299,7 @@ foreach ($site in $sites) {
         $groupId = $tenantRecord.GroupId
     }
 
-    $ownersFound = 0
+    $script:SiteOwnerRowCount = 0
 
     # The primary owner recorded against the site collection itself. Available
     # without opening the site, so it survives a failed connection below.
@@ -282,7 +314,6 @@ foreach ($site in $sites) {
                      -IsGuest ($ownerLogin -imatch '(#ext#|urn:spo:guest)') `
                      -Note 'Primary owner from the tenant site listing'
 
-        $ownersFound++
     }
 
     try {
@@ -302,8 +333,11 @@ foreach ($site in $sites) {
     try {
         $web = Get-PnPWeb -ErrorAction Stop
 
-        $siteTitle = $web.Title
-        $template  = $web.WebTemplate
+        # Only overwrite when the site actually gave us something. WebTemplate in
+        # particular is often not loaded, and blanking the value from the tenant
+        # listing loses information we already had.
+        if ($web.Title)       { $siteTitle = [string]$web.Title }
+        if ($web.WebTemplate) { $template  = [string]$web.WebTemplate }
     }
     catch {
         Write-Verbose "Could not read web properties for $site : $($_.Exception.Message)"
@@ -334,7 +368,6 @@ foreach ($site in $sites) {
                              -PrincipalType $admin.PrincipalType `
                              -IsGuest ($login -imatch '(#ext#|urn:spo:guest)')
 
-                $ownersFound++
             }
         }
         catch {
@@ -363,7 +396,6 @@ foreach ($site in $sites) {
                                  -IsGuest ($login -imatch '(#ext#|urn:spo:guest)') `
                                  -Note $ownersGroup.Title
 
-                    $ownersFound++
                 }
             }
         }
@@ -379,37 +411,88 @@ foreach ($site in $sites) {
 
     if ($IncludeMicrosoft365GroupOwners -and $groupId) {
         try {
-            foreach ($owner in @(Get-PnPMicrosoft365GroupOwner -Identity $groupId -ErrorAction Stop)) {
+            $groupOwners = @()
 
-                $login = [string]$owner.UserPrincipalName
+            # Get-PnPMicrosoft365GroupOwner populates only Id, leaving DisplayName,
+            # UserPrincipalName and Mail empty (pnp/powershell#5069). Asking the
+            # group to include its owners returns fully populated objects.
+            try {
+                $m365Group = Get-PnPMicrosoft365Group -Identity $groupId -IncludeOwners -ErrorAction Stop
+
+                if ($m365Group -and $m365Group.Owners) { $groupOwners = @($m365Group.Owners) }
+            }
+            catch {
+                # A missing group is a real finding (orphaned site) - let it reach
+                # the handler below rather than falling back and reporting the
+                # blank rows the buggy cmdlet returns.
+                if ($_.Exception.Message -match 'does not exist|Not Found|\(404\)') { throw }
+
+                $groupOwners = @(Get-PnPMicrosoft365GroupOwner -Identity $groupId -ErrorAction Stop)
+            }
+
+            if ($groupOwners.Count -eq 0) {
+                $groupOwners = @(Get-PnPMicrosoft365GroupOwner -Identity $groupId -ErrorAction Stop)
+            }
+
+            foreach ($owner in $groupOwners) {
+
+                $ownerName  = [string]$owner.DisplayName
+                $ownerLogin = [string]$owner.UserPrincipalName
+                $ownerMail  = [string]$owner.Mail
+
+                if (-not $ownerMail)  { $ownerMail  = [string]$owner.Email }
+                if (-not $ownerLogin) { $ownerLogin = $ownerMail }
+
+                $note = "Microsoft 365 group $groupId"
+
+                # Fall back to the directory object ID so the row still identifies
+                # someone, rather than being a blank line in the report.
+                if (-not $ownerName -and -not $ownerLogin) {
+
+                    $ownerLogin = [string]$owner.Id
+
+                    if ($ownerLogin) {
+                        $note = "Microsoft 365 group $groupId; only the directory object ID was returned - grant the app User.Read.All to resolve names"
+                    }
+                }
 
                 Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
                              -GroupConnected $isGroupConnected -Source 'Microsoft365GroupOwner' `
-                             -OwnerName $owner.DisplayName -OwnerLogin $login -OwnerEmail $owner.Email `
+                             -OwnerName $ownerName -OwnerLogin $ownerLogin -OwnerEmail $ownerMail `
                              -PrincipalType 'User' `
-                             -IsGuest ($login -imatch '#EXT#') `
-                             -Note "Microsoft 365 group $groupId"
+                             -IsGuest ($ownerLogin -imatch '#EXT#') `
+                             -Note $note
 
-                $ownersFound++
             }
         }
         catch {
-            # Reading group owners needs Graph permissions the SharePoint-only
-            # connection may not carry; report rather than fail the whole run.
-            Write-Warning "  Microsoft 365 group owners unavailable for $site : $($_.Exception.Message)"
-            Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
-                         -GroupConnected $isGroupConnected -Source 'Microsoft365GroupOwner' `
-                         -Note "Unavailable (Graph permission may be missing): $($_.Exception.Message)"
+            $reason = $_.Exception.Message
+
+            # A 404 here means the site outlived the group it was connected to.
+            if ($reason -match 'does not exist|Not Found|\(404\)') {
+                Write-Warning "  $site is connected to Microsoft 365 group $groupId, which no longer exists."
+
+                Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
+                             -GroupConnected $isGroupConnected -Source 'OrphanedGroup' `
+                             -Note "Connected Microsoft 365 group $groupId no longer exists. The site has no group to inherit owners from and needs a new owner."
+            }
+            else {
+                Write-Warning "  Microsoft 365 group owners unavailable for $site : $reason"
+
+                Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
+                             -GroupConnected $isGroupConnected -Source 'Microsoft365GroupOwner' `
+                             -Note "Unavailable (Graph permission may be missing): $reason"
+            }
         }
     }
 
-    if ($ownersFound -eq 0) {
+    if ($script:SiteOwnerRowCount -eq 0) {
         Add-OwnerRow -Site $site -SiteTitle $siteTitle -Template $template `
                      -GroupConnected $isGroupConnected -Source 'None' `
                      -Note 'No owners were found for this site'
     }
 
-    Write-Host ("[{0}/{1}] {2} - {3} owner(s)" -f $counter, $sites.Count, $site, $ownersFound) -ForegroundColor DarkGray
+    Write-Host ("[{0}/{1}] {2} - {3} owner(s)" -f $counter, $sites.Count, $site, $script:SiteOwnerRowCount) -ForegroundColor DarkGray
 
 }
 
@@ -431,6 +514,16 @@ Write-Host "  Owner rows      : $($report.Count)"
 
 $report | Group-Object OwnerSource | Sort-Object Name | ForEach-Object {
     Write-Host ("    {0,-26} {1}" -f $_.Name, $_.Count)
+}
+
+if ($script:FilteredSystemPrincipals -gt 0) {
+    Write-Host "  Filtered out    : $($script:FilteredSystemPrincipals) system / tenant-admin-role principal(s). Use -IncludeSystemPrincipals to keep them." -ForegroundColor DarkGray
+}
+
+$orphaned = @($report | Where-Object { $_.OwnerSource -eq 'OrphanedGroup' })
+
+if ($orphaned.Count -gt 0) {
+    Write-Host "  Orphaned sites  : $($orphaned.Count) connected to a Microsoft 365 group that no longer exists." -ForegroundColor Yellow
 }
 
 $guestOwners = @($report | Where-Object { $_.IsGuest -eq $true -or $_.IsGuest -eq 'True' })
