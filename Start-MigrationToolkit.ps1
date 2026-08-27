@@ -251,14 +251,18 @@ function Show-Command {
     <#  Prints the equivalent command line, so the run can be repeated without the
         wizard and so there is no mystery about what is being executed. #>
     param(
-        [Parameter(Mandatory)][string]$ScriptPath,
+        [string]$ScriptPath,
+
+        # For a cmdlet rather than one of the toolkit's scripts.
+        [string]$CommandName,
+
         [Parameter(Mandatory)][hashtable]$Parameters
     )
 
-    $name = Split-Path -Path $ScriptPath -Leaf
+    $name = if ($CommandName) { $CommandName } else { '.\' + (Split-Path -Path $ScriptPath -Leaf) }
 
     Write-Host '   Equivalent command:' -ForegroundColor DarkGray
-    Write-Host "     .\$name" -ForegroundColor DarkCyan -NoNewline
+    Write-Host "     $name" -ForegroundColor DarkCyan -NoNewline
 
     foreach ($key in ($Parameters.Keys | Sort-Object)) {
 
@@ -381,7 +385,8 @@ function Get-SharePointAuth {
 
         Write-Explain @(
             'PnP needs an app registration even to sign in as you. If you do not',
-            'have a client ID, see the README section "Entra app registration".'
+            'have a client ID yet, quit and run "Register the app in Entra ID"',
+            'from the main menu first - it creates one and prints the ID.'
         )
 
         $auth['ClientId'] = Read-Text -Prompt '   Client ID' `
@@ -977,6 +982,112 @@ function Invoke-MembersToViewers {
                          -Description "move $scope$team to view-only$where"
 }
 
+function Invoke-RegisterApp {
+
+    Write-Banner 'Register the app in Entra ID'
+
+    Write-Explain @(
+        'The SharePoint tasks need an app registration in your tenant - Microsoft',
+        'removed the shared one PnP used to rely on. This creates it and prints',
+        'the client ID that every SharePoint task then asks for.',
+        '',
+        'Run this once per tenant, signed in as someone who can create app',
+        'registrations and consent to permissions - Application Administrator or',
+        'Global Administrator.'
+    )
+
+    $command = 'Register-PnPEntraIDAppForInteractiveLogin'
+
+    if (-not (Get-Command -Name $command -ErrorAction SilentlyContinue)) {
+        try { Import-Module PnP.PowerShell -ErrorAction Stop } catch { }
+    }
+
+    if (-not (Get-Command -Name $command -ErrorAction SilentlyContinue)) {
+        Write-Host '   PnP.PowerShell is not available, so the app cannot be registered here.' -ForegroundColor Red
+        Write-Host '   Run "Check and install what is needed" first.' -ForegroundColor Yellow
+        Write-Host ''
+        return
+    }
+
+    Write-Step 'Which tenant?'
+
+    $tenant = Read-Text -Prompt '   Tenant name (e.g. contoso.onmicrosoft.com)' `
+        -Validate ${function:Test-LooksLikeTenant} `
+        -ValidationMessage 'That should look like contoso.onmicrosoft.com.'
+
+    Write-Step 'What should it be called?'
+
+    Write-Explain @('This is just a label, so you can find it in the Entra portal later.')
+
+    $appName = Read-Text -Prompt '   Application name' -Default 'PnP Migration'
+
+    $parameters = @{
+        ApplicationName                = $appName
+        Tenant                         = $tenant
+        SharePointDelegatePermissions  = 'AllSites.FullControl'
+        GraphDelegatePermissions       = 'Group.Read.All','User.Read.All'
+    }
+
+    Write-Step 'How should you sign in to create it?'
+
+    $how = Read-Choice -Options @(
+        @{ Key = 'browser'; Label = 'Open a browser'; Detail = 'Usual choice.' }
+        @{ Key = 'device';  Label = 'Show me a code to enter on another device'
+           Detail = 'For a machine with no browser, or when the browser flow is awkward with MFA.' }
+    )
+
+    if ($how -eq 'device') { $parameters['DeviceLogin'] = $true }
+
+    Write-Step 'Creating the registration'
+
+    Write-Explain @(
+        'These permissions are what the scripts actually use: full control of',
+        'SharePoint sites, and read-only on groups and users so the owner report',
+        'can resolve names. Left unspecified, the command grants more than that.'
+    )
+
+    Show-Command -CommandName $command -Parameters $parameters
+
+    try {
+        $result = & $command @parameters
+
+        Write-Host ''
+        Write-Host '   Registered.' -ForegroundColor Green
+
+        # The property name has varied between PnP releases, so take whichever is
+        # present rather than assuming one.
+        $clientId = @($result.'AzureAppId', $result.'AppId', $result.'ApplicationId') |
+                        Where-Object { $_ } | Select-Object -First 1
+
+        if ($clientId) {
+            Write-Host ''
+            Write-Host "   Client ID: $clientId" -ForegroundColor Green
+            Write-Host '   Write this down - every SharePoint task asks for it.' -ForegroundColor Yellow
+        }
+        else {
+            Write-Host '   Look for the client ID in the output above, and write it down.' -ForegroundColor Yellow
+        }
+
+        Write-Host ''
+        Write-Host '   Consent can take a minute or two to apply. If the first SharePoint' -ForegroundColor DarkGray
+        Write-Host '   task fails on permissions, wait and try again.' -ForegroundColor DarkGray
+        Write-Host ''
+    }
+    catch {
+        Write-Host ''
+        Write-Host '   That did not work:' -ForegroundColor Red
+
+        foreach ($line in ($_.Exception.Message -split "`n")) {
+            Write-Host "     $($line.TrimEnd())" -ForegroundColor Red
+        }
+
+        Write-Host ''
+        Write-Host '   Most often this means the account you signed in with cannot create' -ForegroundColor Yellow
+        Write-Host '   app registrations, or cannot consent to permissions.' -ForegroundColor Yellow
+        Write-Host ''
+    }
+}
+
 function Invoke-CreateCertificate {
 
     Write-Banner 'Set up a certificate for full site access'
@@ -1036,6 +1147,8 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Header = 'First-time setup'; Note = 'Run once on this machine.' }
         @{ Key = 'check'; Label = 'Check and install what is needed'; Tag = 'read-only'
            Detail = 'Start here. Lists what is missing and offers to install it.' }
+        @{ Key = 'register'; Label = 'Register the app in Entra ID'; Tag = 'changes tenant'
+           Detail = 'Needed before any SharePoint task. Gives you the client ID they ask for.' }
         @{ Key = 'cert';  Label = 'Create a certificate for full site access'; Tag = 'local files'
            Detail = 'Only needed to reach sites you do not administer yourself.' }
 
@@ -1064,6 +1177,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         'import'  { Invoke-ImportGuests }
         'owners'  { Invoke-SiteOwners }
         'viewers' { Invoke-MembersToViewers }
+        'register' { Invoke-RegisterApp }
         'cert'    { Invoke-CreateCertificate }
         'allusers' { Invoke-UserPermissionsReport }
         'check'   { Invoke-CheckSetup }
