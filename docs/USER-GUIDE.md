@@ -203,6 +203,16 @@ Three questions decide the scope:
 
 ---
 
+### List all users and their group access · [Read-only]
+
+Menu option **7**. A spreadsheet of every user in the tenant — staff and guests alike — with the groups each one belongs to.
+
+This one shows **effective** access: a group someone reaches only through another group is included. That makes it right for a permissions review, and different on purpose from the guest export at step 1 of Part 2, which records direct memberships only.
+
+Useful to run against both tenants — before the migration and after — as a record of what access looked like.
+
+---
+
 ## Part 4 — Reading the reports
 
 Everything writes a CSV. These are the values worth understanding.
@@ -218,6 +228,17 @@ Everything writes a CSV. These are the values worth understanding.
 | `Skipped` | Can't be done via Graph, or the name is ambiguous | Check the Detail column |
 | `Failed` | Graph rejected it | Read the Detail column |
 | `WhatIf` | Rehearsal — nothing was changed | None |
+
+### All users report
+
+| Column | Meaning |
+|---|---|
+| `UserType` | `Member` (your staff) or `Guest` |
+| `AccountStatus` | `Enabled` or `Disabled` |
+| `GroupName` | Group display name, or `None` if they belong to none |
+| `GroupType` | Microsoft 365 group, security group, or distribution group |
+
+One row per user per group, so someone in five groups appears five times.
 
 ### Site owners report
 

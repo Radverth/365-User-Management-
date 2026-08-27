@@ -1,10 +1,46 @@
 #Requires -Modules Microsoft.Graph.Users, Microsoft.Graph.Groups
 
-# Define export path
-$ExportPath = "M365_User_Permissions_Report.csv"
+<#
+.SYNOPSIS
+    Lists every user in the tenant with the groups they belong to.
+
+.DESCRIPTION
+    Covers members and guests alike, and reports EFFECTIVE access - memberships
+    inherited through nested groups are included.
+
+    That makes it the right report for a permissions review, and the wrong one to
+    feed into a migration. Export-GuestPermissions.ps1 deliberately records direct
+    memberships only, because nesting re-inherits in the target tenant and
+    replaying transitive membership would create incorrect direct memberships.
+
+    Changes nothing. Read-only.
+
+.PARAMETER OutputPath
+    Where to write the report.
+
+.PARAMETER TenantId
+    Optional tenant ID or domain to sign in against, useful when your account
+    exists in more than one tenant.
+
+.EXAMPLE
+    .\Get-M365UserPermissionsReport.ps1
+
+.EXAMPLE
+    .\Get-M365UserPermissionsReport.ps1 -OutputPath C:\Audit\permissions.csv `
+        -TenantId contoso.onmicrosoft.com
+#>
+
+[CmdletBinding()]
+param(
+    [string]$OutputPath = ".\M365_User_Permissions_Report.csv",
+
+    [string]$TenantId
+)
+
+$ErrorActionPreference = 'Stop'
 
 # Ensure the parent directory exists (bare file names have no parent)
-$ParentDir = Split-Path -Path $ExportPath -Parent
+$ParentDir = Split-Path -Path $OutputPath -Parent
 
 if ($ParentDir -and -not (Test-Path -Path $ParentDir)) {
     New-Item -ItemType Directory -Path $ParentDir -Force | Out-Null
@@ -13,10 +49,13 @@ if ($ParentDir -and -not (Test-Path -Path $ParentDir)) {
 # Connect to Microsoft Graph
 Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
 
-Connect-MgGraph -Scopes `
-    "User.Read.All", `
-    "Group.Read.All", `
-    "Directory.Read.All"
+$ConnectParams = @{
+    Scopes = @('User.Read.All', 'Group.Read.All', 'Directory.Read.All')
+}
+
+if ($TenantId) { $ConnectParams['TenantId'] = $TenantId }
+
+Connect-MgGraph @ConnectParams
 
 # Retrieve all users
 Write-Host "Retrieving users..." -ForegroundColor Cyan
@@ -165,12 +204,12 @@ Write-Host "Exporting report..." -ForegroundColor Green
 $Report |
     Sort-Object DisplayName, GroupName |
     Export-Csv `
-        -Path $ExportPath `
+        -Path $OutputPath `
         -NoTypeInformation `
         -Encoding UTF8
 
 Write-Host "Report exported to:" -ForegroundColor Green
-Write-Host (Resolve-Path -Path $ExportPath).Path -ForegroundColor Green
+Write-Host (Resolve-Path -Path $OutputPath).Path -ForegroundColor Green
 
 # Disconnect
 Disconnect-MgGraph

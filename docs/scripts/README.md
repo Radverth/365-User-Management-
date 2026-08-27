@@ -2,7 +2,7 @@
 
 Documentation for running each script directly, with parameters, rather than through the `Start-MigrationToolkit.ps1` menu.
 
-The menu is a convenience. Everything it does, these scripts do — it only asks questions and passes the answers along. Use these when you want to script a run, schedule one, or pass options the menu doesn't expose.
+The menu is a convenience. Everything it does, these scripts do — it only asks questions and passes the answers along. Every script listed here is reachable from it. Use these when you want to script a run, schedule one, or pass options the menu doesn't expose.
 
 Each has its own page in this folder, named after the script.
 

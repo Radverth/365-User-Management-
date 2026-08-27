@@ -19,19 +19,21 @@ Reports/Get-M365UserPermissionsReport.ps1
 
 ## Parameters
 
-**None.** This script takes no arguments. The output path is set at the top of the file:
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `-OutputPath` | string | `.\M365_User_Permissions_Report.csv` | Where to write the report |
+| `-TenantId` | string | — | Tenant ID or domain to sign in against. Useful when your account exists in more than one tenant |
+
+## Examples
 
 ```powershell
-$ExportPath = "M365_User_Permissions_Report.csv"
-```
-
-Edit that line to change where the report goes. It is written to the current directory by default.
-
-```powershell
+# Current folder, default name
 ./Get-M365UserPermissionsReport.ps1
-```
 
-> This is the oldest script here and predates the others' parameter conventions. It is kept because it works and covers a different question — *all* users, not just guests. If you want it parameterised like the rest, that is a small change worth asking for.
+# Named output, specific tenant
+./Get-M365UserPermissionsReport.ps1 -OutputPath C:\Audit\permissions.csv `
+    -TenantId contoso.onmicrosoft.com
+```
 
 ---
 

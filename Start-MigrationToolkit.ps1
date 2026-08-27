@@ -646,7 +646,8 @@ function Invoke-CheckSetup {
 
     foreach ($relative in @('Guests/Export-GuestPermissions.ps1', 'Guests/Import-GuestPermissions.ps1',
                             'SharePoint/Get-SiteOwners.ps1', 'SharePoint/Set-SiteMembersToViewers.ps1',
-                            'Setup/New-AppOnlyCertificate.ps1', 'Common/InputCsv.ps1', 'Common/PnPConnect.ps1')) {
+                            'Setup/New-AppOnlyCertificate.ps1', 'Reports/Get-M365UserPermissionsReport.ps1',
+                            'Common/InputCsv.ps1', 'Common/PnPConnect.ps1')) {
 
         if (-not (Test-Path -Path (Join-Path -Path $script:Root -ChildPath $relative))) { $missingFiles += $relative }
     }
@@ -721,6 +722,45 @@ function Invoke-CheckSetup {
     }
 
     Write-Host ''
+}
+
+function Invoke-UserPermissionsReport {
+
+    Write-Banner 'List all users and their group access'
+
+    Write-Explain @(
+        'Produces a spreadsheet of every user in the tenant - staff and guests',
+        'alike - with the groups each one belongs to. Nothing is changed.',
+        '',
+        'This shows EFFECTIVE access, so a group someone is in only through',
+        'another group is included. That is what you want for a permissions',
+        'review, and is why it differs from the guest export, which records',
+        'direct memberships only.'
+    )
+
+    Write-Step 'Where should the spreadsheet go?'
+
+    $parameters = @{
+        OutputPath = Get-OutputPath -Prompt 'File to create' -Default './M365_User_Permissions_Report.csv'
+    }
+
+    Write-Step 'Which tenant?'
+
+    Write-Explain @(
+        'Leave this blank unless your account exists in more than one tenant',
+        'and you need to pick a particular one.'
+    )
+
+    $tenant = Read-Text -Prompt '   Tenant name (press Enter to be asked at sign-in)' -AllowEmpty
+
+    if ($tenant) { $parameters['TenantId'] = $tenant }
+
+    Write-Step 'Running the report'
+    Write-Explain @('A browser will open for you to sign in.')
+
+    Show-Command -ScriptPath (Join-Path $script:Root 'Reports/Get-M365UserPermissionsReport.ps1') -Parameters $parameters
+
+    [void](Invoke-ToolkitScript -ScriptPath (Join-Path $script:Root 'Reports/Get-M365UserPermissionsReport.ps1') -Parameters $parameters)
 }
 
 function Invoke-ExportGuests {
@@ -1011,6 +1051,10 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Key = 'viewers'; Label = 'Change site members to view-only'; Tag = 'changes tenant'
            Detail = 'One site, a list from a spreadsheet, or every site in the tenant.' }
 
+        @{ Header = 'Reports'; Note = 'Point-in-time snapshots. Worth keeping as a record.' }
+        @{ Key = 'allusers'; Label = 'List all users and their group access'; Tag = 'read-only'
+           Detail = 'Staff and guests, with every group each one can reach.' }
+
         @{ Header = 'Finish' }
         @{ Key = 'quit'; Label = 'Quit' }
     )
@@ -1021,6 +1065,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         'owners'  { Invoke-SiteOwners }
         'viewers' { Invoke-MembersToViewers }
         'cert'    { Invoke-CreateCertificate }
+        'allusers' { Invoke-UserPermissionsReport }
         'check'   { Invoke-CheckSetup }
         'quit'    {
             Write-Host ''
