@@ -142,7 +142,12 @@ function Import-InputCsv {
     param(
         [Parameter(Mandatory)][string]$Path,
         [string]$Delimiter,
-        [string[]]$RequiredColumns = @()
+        [string[]]$RequiredColumns = @(),
+
+        # What the caller wanted, named in the error when the wrong file arrives.
+        # Without it the advice would have to be generic, or - worse - specific to
+        # whichever caller was written first.
+        [string]$Expected = 'the file this script expects'
     )
 
     Assert-TextCsv -Path $Path
@@ -281,8 +286,8 @@ function Import-InputCsv {
         }
         else {
             [void]$message.AppendLine('')
-            [void]$message.AppendLine('  Pass the CSV produced by Export-GuestPermissions.ps1, not the unsupported-')
-            [void]$message.AppendLine('  groups CSV or a report from another script.')
+            [void]$message.AppendLine("  This does not look like $Expected.")
+            [void]$message.AppendLine('  Check the Found line above against the columns listed as missing.')
         }
 
         throw $message.ToString()

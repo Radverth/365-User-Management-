@@ -187,7 +187,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Csv') {
         throw "Sites CSV not found: $SitesCsvPath"
     }
 
-    $csv = Import-InputCsv -Path $SitesCsvPath -Delimiter $Delimiter -RequiredColumns @('SiteUrl')
+    $csv = Import-InputCsv -Path $SitesCsvPath -Delimiter $Delimiter -Expected 'a site list with a SiteUrl column' -RequiredColumns @('SiteUrl')
 
     if ($csv.Count -eq 0) { throw "Sites CSV is empty: $SitesCsvPath" }
 

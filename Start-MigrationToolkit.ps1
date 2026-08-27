@@ -28,6 +28,12 @@ $ErrorActionPreference = 'Stop'
 
 $script:Root = $PSScriptRoot
 
+# Shared CSV input handling, so the wizard can validate a site list at the moment
+# it is chosen rather than leaving it to the script it launches.
+$inputCsvPath = Join-Path -Path $script:Root -ChildPath 'Common/InputCsv.ps1'
+
+if (Test-Path -Path $inputCsvPath) { . $inputCsvPath }
+
 #region Console helpers -------------------------------------------------------
 
 function Write-Banner {
@@ -139,27 +145,62 @@ function Read-Text {
 }
 
 function Read-Choice {
-    <#  Numbered menu. Returns the Key of the chosen option. #>
+    <#  Numbered menu. Returns the Key of the chosen option.
+
+        An entry carrying a Header instead of a Label prints as a section heading
+        and is not numbered, so a long menu can be grouped without the numbering
+        skipping. An entry may also carry a Tag, printed on the right, which is
+        where read-only versus makes-changes is shown. #>
     param(
         [Parameter(Mandatory)][array]$Options,
         [string]$Prompt = 'Choose'
     )
 
+    $selectable = @($Options | Where-Object { -not $_.Header })
+
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
 
         $index = 1
+        $printedAny = $false
 
         foreach ($option in $Options) {
-            Write-Host ("   {0}. {1}" -f $index, $option.Label) -ForegroundColor White
 
-            if ($option.Detail) { Write-Host ("      {0}" -f $option.Detail) -ForegroundColor DarkGray }
+            if ($option.Header) {
+                # Separator between groups, but not above the first one - the
+                # caller has already spaced the menu away from what precedes it.
+                if ($printedAny) { Write-Host '' }
 
+                Write-Host ("   {0}" -f $option.Header.ToUpper()) -ForegroundColor Cyan
+
+                if ($option.Note) { Write-Host ("   {0}" -f $option.Note) -ForegroundColor DarkGray }
+
+                $printedAny = $true
+                continue
+            }
+
+            $line = "    {0,2}  {1}" -f $index, $option.Label
+
+            Write-Host $line -ForegroundColor White -NoNewline
+
+            if ($option.Tag) {
+                $pad = [Math]::Max(1, 56 - $line.Length)
+                $colour = if ($option.Tag -match 'change') { 'Yellow' } else { 'DarkGray' }
+
+                Write-Host ((' ' * $pad) + $option.Tag) -ForegroundColor $colour
+            }
+            else {
+                Write-Host ''
+            }
+
+            if ($option.Detail) { Write-Host ("        {0}" -f $option.Detail) -ForegroundColor DarkGray }
+
+            $printedAny = $true
             $index++
         }
 
         Write-Host ''
 
-        $answer = Read-Line -Prompt "$Prompt [1-$($Options.Count)]"
+        $answer = Read-Line -Prompt "$Prompt [1-$($selectable.Count)]"
 
         if ($answer -match '^\s*$') {
             Write-Host '   Please pick a number.' -ForegroundColor Yellow
@@ -172,10 +213,10 @@ function Read-Choice {
         if ($answer -match '^\d+$') {
             $picked = [int]$answer
 
-            if ($picked -ge 1 -and $picked -le $Options.Count) { return $Options[$picked - 1].Key }
+            if ($picked -ge 1 -and $picked -le $selectable.Count) { return $selectable[$picked - 1].Key }
         }
 
-        Write-Host "   Enter a number between 1 and $($Options.Count)." -ForegroundColor Yellow
+        Write-Host "   Enter a number between 1 and $($selectable.Count)." -ForegroundColor Yellow
         Write-Host ''
     }
 
@@ -331,7 +372,7 @@ function Get-SharePointAuth {
         @{ Key = 'interactive'; Label = 'Sign in as me'
            Detail = 'Simplest. A browser opens. You will only see sites you administer.' }
         @{ Key = 'appOnly'; Label = 'Use the app certificate'
-           Detail = 'Reaches every site in the tenant. Needs the certificate set up first (option 5 on the main menu).' }
+           Detail = 'Reaches every site in the tenant. Needs the certificate created first - "Create a certificate for full site access" on the main menu.' }
     )
 
     $auth = @{}
@@ -418,11 +459,69 @@ function Get-SiteSelection {
         }
 
         'csv' {
-            return @{
-                SitesCsvPath = Read-Text -Prompt '   Path to the .csv file' `
+
+            Write-Host ''
+            Write-Explain @(
+                'The file needs one column headed SiteUrl, and one site per row:',
+                '',
+                '    SiteUrl',
+                '    https://contoso.sharepoint.com/sites/Marketing',
+                '    https://contoso.sharepoint.com/sites/Projects',
+                '',
+                'Other columns are ignored, so a site list exported from elsewhere',
+                'usually works as-is.'
+            )
+
+            for ($attempt = 0; $attempt -lt 5; $attempt++) {
+
+                $path = Read-Text -Prompt '   Path to the .csv file' `
                     -Validate { param($v) Test-Path -Path $v } `
                     -ValidationMessage 'No file at that path. Check the location and try again.'
+
+                # Read it now rather than letting the script fail later: a beginner
+                # who picked the wrong file should find out here, and seeing the
+                # count confirms it is the list they meant.
+                try {
+                    $rows = Import-InputCsv -Path $path -Expected 'a site list with a SiteUrl column' -RequiredColumns @('SiteUrl')
+
+                    $found = @($rows | Select-Object -ExpandProperty SiteUrl |
+                                Where-Object { $_ } | ForEach-Object { $_.Trim() })
+
+                    if ($found.Count -eq 0) {
+                        Write-Host '   That file has a SiteUrl column, but every row is empty.' -ForegroundColor Yellow
+                        continue
+                    }
+
+                    Write-Host ''
+                    Write-Host "   Found $($found.Count) site(s) in that file:" -ForegroundColor Green
+
+                    foreach ($site in ($found | Select-Object -First 5)) {
+                        Write-Host "     $site" -ForegroundColor DarkGray
+                    }
+
+                    if ($found.Count -gt 5) {
+                        Write-Host "     ... and $($found.Count - 5) more" -ForegroundColor DarkGray
+                    }
+
+                    Write-Host ''
+
+                    if (Read-YesNo -Prompt '   Is that the right list?' -Default $true) {
+                        return @{ SitesCsvPath = $path }
+                    }
+                }
+                catch {
+                    Write-Host ''
+                    Write-Host '   That file could not be read as a site list:' -ForegroundColor Yellow
+
+                    foreach ($line in ($_.Exception.Message -split "`n")) {
+                        Write-Host "     $($line.TrimEnd())" -ForegroundColor Yellow
+                    }
+
+                    Write-Host ''
+                }
             }
+
+            throw 'No usable site list was given. Exiting.'
         }
     }
 }
@@ -868,13 +967,26 @@ for ($loop = 0; $loop -lt 100; $loop++) {
     Write-Step 'What would you like to do?'
 
     $task = Read-Choice -Options @(
-        @{ Key = 'export';  Label = 'Export guest users from the old tenant';   Detail = 'Creates a spreadsheet. Changes nothing.' }
-        @{ Key = 'import';  Label = 'Create those guests in the new tenant';    Detail = 'Makes changes. Previewed first.' }
-        @{ Key = 'owners';  Label = 'Report who owns your SharePoint sites';    Detail = 'Creates a spreadsheet. Changes nothing.' }
-        @{ Key = 'viewers'; Label = 'Change site members to view-only';         Detail = 'Makes changes. Previewed first.' }
-        @{ Key = 'cert';    Label = 'Set up a certificate for full site access'; Detail = 'Do this once, if you need every site.' }
-        @{ Key = 'check';   Label = 'Check and install what is needed'; Detail = 'Offers to install any missing PowerShell modules.' }
-        @{ Key = 'quit';    Label = 'Quit' }
+        @{ Header = 'First-time setup'; Note = 'Run once on this machine.' }
+        @{ Key = 'check'; Label = 'Check and install what is needed'; Tag = 'read-only'
+           Detail = 'Start here. Lists what is missing and offers to install it.' }
+        @{ Key = 'cert';  Label = 'Create a certificate for full site access'; Tag = 'local files'
+           Detail = 'Only needed to reach sites you do not administer yourself.' }
+
+        @{ Header = 'Move guests to a new tenant'; Note = 'Do these in order - step 2 reads what step 1 writes.' }
+        @{ Key = 'export'; Label = 'Step 1 - Export guests from the old tenant'; Tag = 'read-only'
+           Detail = 'Writes a spreadsheet of guests and their groups.' }
+        @{ Key = 'import'; Label = 'Step 2 - Create those guests in the new tenant'; Tag = 'changes tenant'
+           Detail = 'Rehearsed first. Nothing is created until you confirm.' }
+
+        @{ Header = 'SharePoint permissions'; Note = 'Independent of the guest migration.' }
+        @{ Key = 'owners';  Label = 'Report who owns your sites'; Tag = 'read-only'
+           Detail = 'Writes a spreadsheet. Good to run before changing anything.' }
+        @{ Key = 'viewers'; Label = 'Change site members to view-only'; Tag = 'changes tenant'
+           Detail = 'One site, or a list of sites from a spreadsheet.' }
+
+        @{ Header = 'Finish' }
+        @{ Key = 'quit'; Label = 'Quit' }
     )
 
     switch ($task) {

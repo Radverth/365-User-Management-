@@ -63,7 +63,7 @@ cd /path/to/the/toolkit/folder
 
 ### Step 3 — Install the modules
 
-Start the menu and choose **Check and install what is needed**. It lists what's missing and offers to install it for your user account only — no admin rights needed.
+Start the menu and choose **Check and install what is needed** — the first option, under *First-time setup*. It lists what's missing and offers to install it for your user account only — no admin rights needed.
 
 ```powershell
 ./Start-MigrationToolkit.ps1
@@ -119,7 +119,7 @@ Do these in order. Each step depends on the one before it.
 
 ### Step 1 — Export from the old tenant · [Read-only]
 
-Menu option **1**. Sign in to the tenant you're moving *away from*. It reads every guest and the groups they belong to.
+Menu option **3**. Sign in to the tenant you're moving *away from*. It reads every guest and the groups they belong to.
 
 **What you get.** Two spreadsheets. `TenantA_GuestPermissions.csv` is the one the import reads. `…_Unsupported.csv` lists memberships that can't be recreated automatically — deal with those at step 6.
 
@@ -133,7 +133,7 @@ This is the single most common cause of a half-finished migration.
 
 ### Step 3 — Rehearse the import · [Read-only]
 
-Menu option **2**, signing in to the *new* tenant. The wizard previews automatically before doing anything. Nothing is created yet — but every group name is checked against the new tenant, which is the point.
+Menu option **4**, signing in to the *new* tenant. The wizard previews automatically before doing anything. Nothing is created yet — but every group name is checked against the new tenant, which is the point.
 
 **What to look for.** Open the log file it writes. Any row with status `GroupNotFound` is a group missing from the new tenant. Fix those before going further, or those memberships are silently skipped.
 
@@ -167,7 +167,7 @@ Independent of the guest migration — run these whenever you need them.
 
 ### Find out who owns what · [Read-only]
 
-Menu option **3**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
+Menu option **5**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
 
 "Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see Reading the reports.
 
@@ -175,7 +175,17 @@ Menu option **3**. Choose "every site in the tenant" and give it your admin URL 
 
 ### Make members read-only · [Changes your tenant]
 
-Menu option **4**. Moves people out of a site's Members group and into Visitors, so they can read but not edit. People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
+Menu option **6**. Moves people out of a site's Members group and into Visitors, so they can read but not edit.
+
+You can do one site, or a whole list. Choosing the spreadsheet option asks for a `.csv` file with a single column headed `SiteUrl`, one site per row:
+
+```
+SiteUrl
+https://contoso.sharepoint.com/sites/Marketing
+https://contoso.sharepoint.com/sites/Projects
+```
+
+Other columns are ignored, so a site list exported from elsewhere usually works as-is. The wizard reads the file straight away, shows you how many sites it found, and asks you to confirm before going any further. People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
 
 Three questions decide the scope:
 

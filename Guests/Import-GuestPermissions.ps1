@@ -166,7 +166,7 @@ if (-not (Test-Path -Path $InputPath)) {
 
 Initialize-OutputPath -Path $LogPath
 
-$rows = Import-InputCsv -Path $InputPath -Delimiter $Delimiter -RequiredColumns @(
+$rows = Import-InputCsv -Path $InputPath -Delimiter $Delimiter -Expected 'the CSV produced by Export-GuestPermissions.ps1' -RequiredColumns @(
     'ExternalEmail', 'GuestDisplayName', 'GroupDisplayName', 'MembershipType', 'Importable'
 )
 
