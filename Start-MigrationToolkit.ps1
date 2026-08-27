@@ -901,7 +901,10 @@ function Invoke-MembersToViewers {
 
     Write-Explain @(
         'Moves people out of a site''s Members group and into its Visitors group,',
-        'so they can read the site but no longer edit it.',
+        'and reduces any permission given to them directly on the site to read-only.',
+        '',
+        'Both matter: moving someone out of Members changes nothing if they were',
+        'also given Edit directly on the site.',
         '',
         'People are added to Visitors before being removed from Members, so nobody',
         'is ever left without access.'
@@ -934,14 +937,31 @@ function Invoke-MembersToViewers {
 
     Write-Step 'Who should be moved?'
 
-    $who = Read-Choice -Options @(
-        @{ Key = 'guests'; Label = 'Guests only'
+    Write-Explain @('This applies to group membership and direct permissions alike.')
+
+    $parameters['Scope'] = Read-Choice -Options @(
+        @{ Key = 'Guests'; Label = 'Guests only'
            Detail = 'External people. Your own staff keep their current access.' }
-        @{ Key = 'everyone'; Label = 'Everyone listed as a member'
-           Detail = 'Guests and your own staff.' }
+        @{ Key = 'Staff'; Label = 'Staff only'
+           Detail = 'Your own users. Guests keep their current access.' }
+        @{ Key = 'Both'; Label = 'Guests and staff'
+           Detail = 'Everyone with edit access to the site.' }
     )
 
-    if ($who -eq 'everyone') { $parameters['IncludeInternalUsers'] = $true }
+    Write-Step 'Direct permissions'
+
+    Write-Explain @(
+        'As well as the Members group, people can be given access directly on a',
+        'site. Those grants are reduced to read-only too, which is almost always',
+        'what you want - otherwise someone moved out of Members carries on',
+        'editing through their direct grant.',
+        '',
+        'Say yes here only if you want to change group membership and nothing else.'
+    )
+
+    if (Read-YesNo -Prompt '   Leave direct permissions alone?' -Default $false) {
+        $parameters['SkipDirectPermissions'] = $true
+    }
 
     Write-Step 'Teams sites'
 
@@ -970,7 +990,15 @@ function Invoke-MembersToViewers {
 
     $parameters['OutputPath'] = Get-OutputPath -Prompt 'Where should the results log go?' -Default './SharePoint_MembersToViewers_Log.csv'
 
-    $scope = if ($parameters.ContainsKey('IncludeInternalUsers')) { 'everyone in the Members group' } else { 'guests in the Members group' }
+    $scope = switch ($parameters['Scope']) {
+        'Both'  { 'guests and staff' }
+        'Staff' { 'staff' }
+        default { 'guests' }
+    }
+
+    $what = if ($parameters.ContainsKey('SkipDirectPermissions')) { ' in the Members group' }
+            else { ' in the Members group and in direct site permissions' }
+
     $team  = if ($parameters.ContainsKey('IncludeSecurityGroups')) { ', including the connected Team' } else { '' }
 
     $where = if ($parameters.ContainsKey('AllSites'))      { ' on EVERY site in the tenant' }
@@ -979,7 +1007,7 @@ function Invoke-MembersToViewers {
 
     Invoke-WithRehearsal -ScriptPath (Join-Path $script:Root 'SharePoint/Set-SiteMembersToViewers.ps1') `
                          -Parameters $parameters `
-                         -Description "move $scope$team to view-only$where"
+                         -Description "move $scope$what$team to view-only$where"
 }
 
 function Invoke-RegisterApp {
@@ -1162,7 +1190,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Key = 'owners';  Label = 'Report who owns your sites'; Tag = 'read-only'
            Detail = 'Writes a spreadsheet. Good to run before changing anything.' }
         @{ Key = 'viewers'; Label = 'Change site members to view-only'; Tag = 'changes tenant'
-           Detail = 'One site, a list from a spreadsheet, or every site in the tenant.' }
+           Detail = 'Groups and direct permissions. One site, a list, or the whole tenant.' }
 
         @{ Header = 'Reports'; Note = 'Point-in-time snapshots. Worth keeping as a record.' }
         @{ Key = 'allusers'; Label = 'List all users and their group access'; Tag = 'read-only'

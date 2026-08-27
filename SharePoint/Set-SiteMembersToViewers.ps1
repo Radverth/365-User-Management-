@@ -6,8 +6,12 @@
     Visitors group, demoting them from Edit to Read.
 
 .DESCRIPTION
-    By default only GUEST accounts are moved. Internal users are left alone unless
-    -IncludeInternalUsers is specified.
+    Two things are demoted, because either alone leaves a hole: membership of the
+    site's Members SharePoint group, and any permission granted to the person
+    directly on the site. Moving someone out of Members achieves nothing if they
+    also hold Edit directly. -SkipDirectPermissions limits it to group membership.
+
+    -Scope decides who: guests only (the default), your own staff only, or both.
 
     For each site the script reads the associated Members group, works out who is
     in scope, adds them to the associated Visitors group and then removes them from
@@ -52,8 +56,23 @@
     ships a shared multi-tenant app, so this is required unless you have set
     PnPManagementShellClientId in your environment. See the README.
 
+.PARAMETER Scope
+    Who to demote:
+
+      Guests  external people only (the default)
+      Staff   your own users only, leaving guests alone
+      Both    everyone
+
+    Applies to SharePoint group membership and to direct permissions alike.
+
+.PARAMETER SkipDirectPermissions
+    Only fix group membership, leaving permissions granted directly on the site
+    untouched. By default both are handled, because someone with direct Edit keeps
+    editing no matter what group they are moved out of.
+
 .PARAMETER IncludeInternalUsers
-    Also demote internal (non-guest) users. Off by default - guests only.
+    Superseded by -Scope Both, and equivalent to it. Still accepted so existing
+    commands keep working.
 
 .PARAMETER IncludeSecurityGroups
     Also demote security groups and Microsoft 365 groups that appear as principals
@@ -115,9 +134,9 @@
     Demote guests across every site listed in sites.csv.
 
 .EXAMPLE
-    .\Set-SiteMembersToViewers.ps1 -SiteUrl $url -ClientId $id -IncludeInternalUsers
+    .\Set-SiteMembersToViewers.ps1 -SiteUrl $url -ClientId $id -Scope Both
 
-    Demote everyone in Members, internal staff included.
+    Demote guests and staff alike, in groups and in direct permissions.
 #>
 
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Urls')]
@@ -139,7 +158,13 @@ param(
 
     [string]$ClientId,
 
+    [ValidateSet('Guests', 'Staff', 'Both')]
+    [string]$Scope,
+
+    # Superseded by -Scope Both. Still honoured so existing commands keep working.
     [switch]$IncludeInternalUsers,
+
+    [switch]$SkipDirectPermissions,
 
     [switch]$IncludeSecurityGroups,
 
@@ -175,6 +200,55 @@ function Initialize-OutputPath {
 
     if ($parent -and -not (Test-Path -Path $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+}
+
+# Permission levels that already mean read-only, plus the system-managed one that
+# must never be stripped: Limited Access is what lets someone reach a parent so an
+# item-level grant works, and removing it breaks that access.
+$script:ReadOnlyRoles = @('Read', 'View Only', 'Restricted View', 'Restricted Read')
+$script:SystemRoles   = @('Limited Access', 'Web-Only Limited Access')
+
+function Get-ScopeDecision {
+    <#  Decides whether one principal is in scope, and says why not when it is not.
+        Shared by the group-membership pass and the direct-permission pass so the
+        two cannot drift apart. #>
+    param(
+        [string]$PrincipalType,
+        [bool]$IsGuest,
+        [Parameter(Mandatory)][string]$Scope,
+        [bool]$AllowGroups
+    )
+
+    # An unknown principal type is treated as a user, so the guests-only default
+    # keeps protecting staff rather than falling through to the group branch.
+    $isUser = (-not $PrincipalType) -or ($PrincipalType -eq 'User')
+
+    if (-not $isUser) {
+
+        if ($AllowGroups) { return [PSCustomObject]@{ InScope = $true; Reason = '' } }
+
+        return [PSCustomObject]@{ InScope = $false
+            Reason = "Principal is a $PrincipalType, not a user. Use -IncludeSecurityGroups to include it." }
+    }
+
+    switch ($Scope) {
+
+        'Both' { return [PSCustomObject]@{ InScope = $true; Reason = '' } }
+
+        'Guests' {
+            if ($IsGuest) { return [PSCustomObject]@{ InScope = $true; Reason = '' } }
+
+            return [PSCustomObject]@{ InScope = $false
+                Reason = 'Your own user. Use -Scope Staff or -Scope Both to include them.' }
+        }
+
+        'Staff' {
+            if (-not $IsGuest) { return [PSCustomObject]@{ InScope = $true; Reason = '' } }
+
+            return [PSCustomObject]@{ InScope = $false
+                Reason = 'Guest. Use -Scope Guests or -Scope Both to include guests.' }
+        }
     }
 }
 
@@ -253,11 +327,25 @@ Initialize-OutputPath -Path $OutputPath
 
 
 Write-Host ''
-if ($IncludeInternalUsers) {
-    Write-Host 'Scope: ALL members (guests and internal users).' -ForegroundColor Yellow
+# -Scope wins; the old switch maps onto it; neither means guests only.
+if (-not $Scope) {
+    $Scope = if ($IncludeInternalUsers) { 'Both' } else { 'Guests' }
+}
+elseif ($IncludeInternalUsers -and $Scope -ne 'Both') {
+    Write-Warning "-IncludeInternalUsers is superseded by -Scope and was ignored; running with -Scope $Scope."
+}
+
+switch ($Scope) {
+    'Both'   { Write-Host 'Scope: guests and staff.' -ForegroundColor Yellow }
+    'Staff'  { Write-Host 'Scope: staff only. Guests keep their current access.' -ForegroundColor Yellow }
+    'Guests' { Write-Host 'Scope: guests only. Use -Scope Staff or -Scope Both to include your own users.' -ForegroundColor Cyan }
+}
+
+if ($SkipDirectPermissions) {
+    Write-Host 'Group membership only. Permissions granted directly on the site are left alone.' -ForegroundColor Yellow
 }
 else {
-    Write-Host 'Scope: guests only. Use -IncludeInternalUsers to include internal staff.' -ForegroundColor Cyan
+    Write-Host 'Covering both group membership and permissions granted directly on the site.' -ForegroundColor DarkGray
 }
 
 if (-not $RemoveFromMembers) {
@@ -410,28 +498,16 @@ foreach ($site in $sites) {
             continue
         }
 
-        # An unknown principal type is treated as a user, so the guests-only default
-        # still protects staff rather than falling through to the group branch.
-        $isUserPrincipal = (-not $type) -or ($type -eq 'User')
-
         # Nested groups are principals too; demoting one moves everyone inside it.
         # On a Microsoft 365 group-connected site the Members group holds the
         # group's member claim, so this is the principal that governs the whole
         # team's access to the site.
-        if (-not $isUserPrincipal -and -not $IncludeSecurityGroups) {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'Skipped' `
-                         -Detail "Principal is a $type, not a user. Use -IncludeSecurityGroups to include it."
-            $skipped++
-            continue
-        }
+        $decision = Get-ScopeDecision -PrincipalType $type -IsGuest $guest -Scope $Scope `
+                                      -AllowGroups $IncludeSecurityGroups
 
-        # Guest versus internal only means anything for an actual user. A group is
-        # neither, so gating it on -IncludeInternalUsers as well would be wrong.
-        if ($isUserPrincipal -and -not $guest -and -not $IncludeInternalUsers) {
+        if (-not $decision.InScope) {
             Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'Skipped' `
-                         -Detail 'Internal user. Use -IncludeInternalUsers to include internal staff.'
+                         -IsGuest $guest -Status 'Skipped' -Detail $decision.Reason
             $skipped++
             continue
         }
@@ -496,6 +572,118 @@ foreach ($site in $sites) {
                              -Detail "Now in Visitors but removal from Members failed: $($_.Exception.Message)"
 
                 Write-Warning "  $title : $($_.Exception.Message)"
+            }
+        }
+    }
+
+    # --- permissions granted directly on the site -------------------------
+
+    # Moving someone between SharePoint groups achieves nothing if they also hold
+    # Edit directly on the site, so unless told otherwise the direct grants are
+    # reduced to Read as well.
+    if (-not $SkipDirectPermissions) {
+
+        $assignments = @()
+
+        try {
+            $web         = Get-PnPWeb -Includes RoleAssignments -ErrorAction Stop
+            $assignments = @($web.RoleAssignments)
+        }
+        catch {
+            Write-Warning "  Could not read direct permissions: $($_.Exception.Message)"
+            Write-Result -Site $site -Status 'Failed' `
+                         -Detail "Direct permissions could not be read: $($_.Exception.Message)"
+        }
+
+        foreach ($assignment in $assignments) {
+
+            try {
+                $member   = Get-PnPProperty -ClientObject $assignment -Property Member -ErrorAction Stop
+                $bindings = @(Get-PnPProperty -ClientObject $assignment -Property RoleDefinitionBindings -ErrorAction Stop)
+            }
+            catch {
+                Write-Result -Site $site -Status 'Failed' `
+                             -Detail "A direct permission entry could not be read: $($_.Exception.Message)"
+                continue
+            }
+
+            $dLogin = [string]$member.LoginName
+            $dTitle = [string]$member.Title
+            $dType  = [string]$member.PrincipalType
+
+            # The site's own SharePoint groups are the membership pass's business.
+            if ($dType -eq 'SharePointGroup') { continue }
+
+            # Never a person, and removing its access breaks the site.
+            if ($dLogin -eq 'SHAREPOINT\system') { continue }
+
+            $dEmail = [string]$member.Email
+            $dGuest = ($dLogin -imatch $GuestLoginPattern)
+
+            if ($ExcludeLogin -and ($ExcludeLogin -contains $dLogin -or ($dEmail -and $ExcludeLogin -contains $dEmail))) {
+                Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                             -IsGuest $dGuest -Status 'Excluded' -Detail 'Direct permission; matched -ExcludeLogin'
+                $skipped++
+                continue
+            }
+
+            $dDecision = Get-ScopeDecision -PrincipalType $dType -IsGuest $dGuest -Scope $Scope `
+                                           -AllowGroups $IncludeSecurityGroups
+
+            if (-not $dDecision.InScope) {
+                Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                             -IsGuest $dGuest -Status 'Skipped' -Detail "Direct permission; $($dDecision.Reason)"
+                $skipped++
+                continue
+            }
+
+            $roles = @($bindings | ForEach-Object { [string]$_.Name })
+
+            # Anything that is not already read-only, and is not system-managed.
+            $editRoles = @($roles | Where-Object {
+                $_ -notin $script:ReadOnlyRoles -and $_ -notin $script:SystemRoles
+            })
+
+            if ($editRoles.Count -eq 0) {
+                Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                             -IsGuest $dGuest -Status 'AlreadyReadOnly' `
+                             -Detail "Direct permission is already read-only: $($roles -join ', ')"
+                continue
+            }
+
+            if ($PSCmdlet.ShouldProcess("$dTitle on $site", "Reduce direct permission to Read")) {
+
+                try {
+                    $permissionParams = @{
+                        User        = $dLogin
+                        RemoveRole  = $editRoles
+                        ErrorAction = 'Stop'
+                    }
+
+                    # Only grant Read if they do not already hold it alongside the
+                    # edit-level role being removed.
+                    if ($roles -notcontains 'Read') { $permissionParams['AddRole'] = 'Read' }
+
+                    Set-PnPWebPermission @permissionParams
+
+                    Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                                 -IsGuest $dGuest -Status 'DirectPermissionReduced' `
+                                 -Detail "Removed $($editRoles -join ', '); left with Read"
+
+                    $moved++
+                }
+                catch {
+                    Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                                 -IsGuest $dGuest -Status 'Failed' `
+                                 -Detail "Direct permission unchanged ($($editRoles -join ', ')): $($_.Exception.Message)"
+
+                    Write-Warning "  $dTitle : direct permission unchanged - $($_.Exception.Message)"
+                }
+            }
+            else {
+                Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
+                             -IsGuest $dGuest -Status 'WhatIf' `
+                             -Detail "Would reduce direct permission from $($editRoles -join ', ') to Read"
             }
         }
     }

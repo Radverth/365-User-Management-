@@ -181,7 +181,14 @@ Menu option **6**. Choose "every site in the tenant" and give it your admin URL 
 
 ### Make members read-only · [Changes your tenant]
 
-Menu option **7**. Moves people out of a site's Members group and into Visitors, so they can read but not edit.
+Menu option **7**. Demotes people from edit to read-only on a site, in both places access comes from:
+
+- **the site's Members group** — they move to Visitors
+- **permissions given to them directly on the site** — reduced to read-only
+
+Both matter. Moving someone out of Members changes nothing if they were also given Edit directly, which is easily done and easily forgotten. The wizard offers to leave direct permissions alone if you really want group membership only.
+
+People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
 
 You can do one site, a whole list, or every site in the tenant. Choosing the spreadsheet option asks for a `.csv` file with a single column headed `SiteUrl`, one site per row:
 
@@ -195,11 +202,9 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 
 > **Choosing "every site in the tenant"** changes permissions across the whole tenant, so it asks you to confirm that specifically before anything else. Personal OneDrive sites are left out, and sites with no Visitors group are skipped rather than half-changed. You still get the full preview before anything is applied.
 >
-> Signing in as yourself only reaches sites you administer, so a tenant-wide run will fail on the rest. Use the certificate from Part 1 if you need to cover everything. People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
+> Signing in as yourself only reaches sites you administer, so a tenant-wide run will fail on the rest. Use the certificate from Part 1 if you need to cover everything. Three questions decide the scope:
 
-Three questions decide the scope:
-
-- **Guests only, or everyone?** Guests only is the default. Your own staff keep their access unless you say otherwise.
+- **Who?** Guests only (the default), your own staff only, or both. Whichever you choose applies to group membership and direct permissions alike.
 - **Move the Team entry?** On a Teams-connected site this is the important one — see below.
 - **Anyone to leave alone?** Give the email addresses of service or break-glass accounts that must keep editing.
 
