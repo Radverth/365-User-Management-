@@ -267,7 +267,7 @@ Your PnP module is too old to cache the sign-in. Update it:
 Update-Module PnP.PowerShell
 ```
 
-The scripts warn about this at startup when they detect it. Menu option 6 offers the update for you.
+The scripts warn about this at startup when they detect it. **Check and install what is needed** — the first menu option — offers the update for you.
 
 ### "A parameter cannot be found that matches parameter name…"
 
