@@ -31,6 +31,22 @@
 .PARAMETER SitesCsvPath
     CSV containing a SiteUrl column, as an alternative to -SiteUrl.
 
+.PARAMETER AllSites
+    Every site in the tenant. Requires -TenantAdminUrl.
+
+    This demotes members across the whole tenant, so read the rehearsal output
+    before committing. Personal OneDrive sites are excluded unless
+    -IncludeOneDrive is given, and sites with no Visitors group are skipped rather
+    than half-processed.
+
+.PARAMETER TenantAdminUrl
+    Your tenant admin URL, e.g. https://contoso-admin.sharepoint.com. Required
+    with -AllSites.
+
+.PARAMETER IncludeOneDrive
+    With -AllSites, also include personal OneDrive sites. Excluded by default -
+    demoting someone on their own OneDrive is rarely intended.
+
 .PARAMETER ClientId
     Client ID of the Entra app registration used by PnP.PowerShell. PnP no longer
     ships a shared multi-tenant app, so this is required unless you have set
@@ -112,6 +128,15 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Csv')]
     [string]$SitesCsvPath,
 
+    [Parameter(Mandatory, ParameterSetName = 'All')]
+    [switch]$AllSites,
+
+    [Parameter(Mandatory, ParameterSetName = 'All')]
+    [string]$TenantAdminUrl,
+
+    [Parameter(ParameterSetName = 'All')]
+    [switch]$IncludeOneDrive,
+
     [string]$ClientId,
 
     [switch]$IncludeInternalUsers,
@@ -180,8 +205,33 @@ if (-not (Test-Path -Path $pnpConnectPath)) {
 
 #endregion Helpers ------------------------------------------------------------
 
+# Built before the sites are resolved, because -AllSites has to sign in to the
+# tenant admin site to enumerate them.
+$auth = New-ScriptAuthContext -ClientId $ClientId -Tenant $Tenant -Thumbprint $Thumbprint `
+                              -CertificatePath $CertificatePath -CertificatePassword $CertificatePassword `
+                              -NoPersistedLogin:$NoPersistedLogin
+
 # Resolve the list of sites.
-if ($PSCmdlet.ParameterSetName -eq 'Csv') {
+if ($PSCmdlet.ParameterSetName -eq 'All') {
+
+    Write-Host "Connecting to $TenantAdminUrl to enumerate sites..." -ForegroundColor Cyan
+
+    Connect-ScriptSite -Url $TenantAdminUrl -Auth $auth
+
+    $tenantSites = @(Get-PnPTenantSite -ErrorAction Stop)
+
+    if (-not $IncludeOneDrive) {
+        $tenantSites = @($tenantSites | Where-Object { $_.Template -notlike 'SPSPERS*' })
+    }
+
+    $sites = @($tenantSites | Select-Object -ExpandProperty Url)
+
+    Write-Host "  $($sites.Count) site(s) found." -ForegroundColor Green
+    Write-Host ''
+    Write-Warning "This will demote members across every one of those $($sites.Count) site(s)."
+    Write-Warning 'Run it with -WhatIf first and read the log before committing.'
+}
+elseif ($PSCmdlet.ParameterSetName -eq 'Csv') {
 
     if (-not (Test-Path -Path $SitesCsvPath)) {
         throw "Sites CSV not found: $SitesCsvPath"
@@ -201,9 +251,6 @@ if ($sites.Count -eq 0) { throw 'No site URLs to process.' }
 
 Initialize-OutputPath -Path $OutputPath
 
-$auth = New-ScriptAuthContext -ClientId $ClientId -Tenant $Tenant -Thumbprint $Thumbprint `
-                              -CertificatePath $CertificatePath -CertificatePassword $CertificatePassword `
-                              -NoPersistedLogin:$NoPersistedLogin
 
 Write-Host ''
 if ($IncludeInternalUsers) {

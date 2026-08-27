@@ -177,7 +177,7 @@ Menu option **5**. Choose "every site in the tenant" and give it your admin URL 
 
 Menu option **6**. Moves people out of a site's Members group and into Visitors, so they can read but not edit.
 
-You can do one site, or a whole list. Choosing the spreadsheet option asks for a `.csv` file with a single column headed `SiteUrl`, one site per row:
+You can do one site, a whole list, or every site in the tenant. Choosing the spreadsheet option asks for a `.csv` file with a single column headed `SiteUrl`, one site per row:
 
 ```
 SiteUrl
@@ -185,7 +185,11 @@ https://contoso.sharepoint.com/sites/Marketing
 https://contoso.sharepoint.com/sites/Projects
 ```
 
-Other columns are ignored, so a site list exported from elsewhere usually works as-is. The wizard reads the file straight away, shows you how many sites it found, and asks you to confirm before going any further. People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
+Other columns are ignored, so a site list exported from elsewhere usually works as-is. The wizard reads the file straight away, shows you how many sites it found, and asks you to confirm before going any further.
+
+> **Choosing "every site in the tenant"** changes permissions across the whole tenant, so it asks you to confirm that specifically before anything else. Personal OneDrive sites are left out, and sites with no Visitors group are skipped rather than half-changed. You still get the full preview before anything is applied.
+>
+> Signing in as yourself only reaches sites you administer, so a tenant-wide run will fail on the rest. Use the certificate from Part 1 if you need to cover everything. People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
 
 Three questions decide the scope:
 

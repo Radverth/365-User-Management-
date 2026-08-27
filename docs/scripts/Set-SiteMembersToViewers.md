@@ -19,10 +19,21 @@ SharePoint/Set-SiteMembersToViewers.ps1
 
 ## Parameters
 
+### Choosing sites — three mutually exclusive forms
+
+| Parameter set | Parameters |
+|---|---|
+| One or more URLs | `-SiteUrl <string[]>` |
+| From a spreadsheet | `-SitesCsvPath <file>` — needs a `SiteUrl` column |
+| Whole tenant | `-AllSites -TenantAdminUrl <url>` (both required together) |
+
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `-SiteUrl` | string[] | **required**¹ | One or more site collection URLs |
-| `-SitesCsvPath` | string | **required**¹ | CSV with a `SiteUrl` column |
+| `-SiteUrl` | string[] | — | One or more site collection URLs |
+| `-SitesCsvPath` | string | — | CSV with a `SiteUrl` column |
+| `-AllSites` | switch | — | Every site in the tenant |
+| `-TenantAdminUrl` | string | — | Required with `-AllSites`, e.g. `https://contoso-admin.sharepoint.com` |
+| `-IncludeOneDrive` | switch | off | With `-AllSites`, also include personal OneDrive sites |
 | `-IncludeInternalUsers` | switch | off | Also demote internal staff. **Off means guests only** |
 | `-IncludeSecurityGroups` | switch | off | Also demote group principals inside Members — see below |
 | `-GuestLoginPattern` | string | `(#ext#\|urn:spo:guest)` | Regex identifying a guest by login name |
@@ -37,8 +48,6 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `-OutputPath` | string | `.\SharePoint_MembersToViewers_Log.csv` | Outcome of every principal considered |
 | `-Delimiter` | string | auto | Field separator of `-SitesCsvPath` |
 
-¹ `-SiteUrl` and `-SitesCsvPath` are alternatives; supply exactly one.
-
 ## Examples
 
 ```powershell
@@ -51,6 +60,11 @@ SharePoint/Set-SiteMembersToViewers.ps1
     -SiteUrl https://contoso.sharepoint.com/sites/Project `
     -IncludeInternalUsers -IncludeSecurityGroups `
     -ExcludeLogin svc-admin@contoso.com
+
+# Every site in the tenant - rehearse this one first
+./Set-SiteMembersToViewers.ps1 -AllSites `
+    -TenantAdminUrl https://contoso-admin.sharepoint.com `
+    -ClientId <app id> -WhatIf
 
 # Many sites from a spreadsheet, app-only
 ./Set-SiteMembersToViewers.ps1 -SitesCsvPath ./sites.csv `
@@ -99,5 +113,15 @@ Guest-versus-internal only applies to actual users. A group principal is neither
 **Safe to re-run.** Anyone already in Visitors is not re-added; anyone already out of Members is untouched.
 
 **Sites with no Visitors group are skipped, not half-done.** Removing people from Members with nowhere to put them would silently revoke access, so the whole site is skipped and logged.
+
+**`-AllSites` is tenant-wide and destructive.** It enumerates every site from the
+tenant admin site and demotes members across all of them. Personal OneDrive sites
+are excluded unless `-IncludeOneDrive` is given. The script prints the site count
+and a warning before starting. Rehearse with `-WhatIf` and read the log first —
+this is the one option where a mistake is expensive to undo.
+
+Interactive sign-in only reaches sites you administer, so a tenant-wide run will
+report `SiteFailed` on the rest. App-only sign-in with `Sites.FullControl.All`
+reaches all of them.
 
 **One sign-in for the whole run.** The connection is reused across sites and disconnected once at the end.

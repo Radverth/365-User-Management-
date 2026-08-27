@@ -423,7 +423,7 @@ function Get-SiteSelection {
 
     if ($AllowAllSites) {
         $options += @{ Key = 'all'; Label = 'Every site in the tenant'
-                       Detail = 'Takes a while on a large tenant - each site is opened in turn.' }
+                       Detail = 'Each site is opened in turn, so allow time on a large tenant.' }
     }
 
     $options += @{ Key = 'one'; Label = 'One site I will type in' }
@@ -862,7 +862,29 @@ function Invoke-MembersToViewers {
         'is ever left without access.'
     )
 
-    $parameters = Get-SiteSelection
+    $parameters = Get-SiteSelection -AllowAllSites
+
+    # Tenant-wide and destructive is a different order of risk from one site, so
+    # it gets its own confirmation before any of the other questions are asked.
+    if ($parameters.ContainsKey('AllSites')) {
+
+        Write-Host ''
+        Write-Explain @(
+            'This will change permissions on EVERY site in the tenant, not just',
+            'the ones you administer.',
+            '',
+            'Personal OneDrive sites are left out. Sites with no Visitors group are',
+            'skipped rather than half-changed. You will still see a full preview',
+            'before anything is applied.'
+        )
+
+        if (-not (Read-YesNo -Prompt '   Are you sure you want every site?' -Default $false)) {
+            Write-Host ''
+            Write-Host '   Cancelled. Nothing was changed.' -ForegroundColor Yellow
+            return
+        }
+    }
+
     $parameters += Get-SharePointAuth
 
     Write-Step 'Who should be moved?'
@@ -906,9 +928,13 @@ function Invoke-MembersToViewers {
     $scope = if ($parameters.ContainsKey('IncludeInternalUsers')) { 'everyone in the Members group' } else { 'guests in the Members group' }
     $team  = if ($parameters.ContainsKey('IncludeSecurityGroups')) { ', including the connected Team' } else { '' }
 
+    $where = if ($parameters.ContainsKey('AllSites'))      { ' on EVERY site in the tenant' }
+             elseif ($parameters.ContainsKey('SitesCsvPath')) { ' on every site in your list' }
+             else                                             { '' }
+
     Invoke-WithRehearsal -ScriptPath (Join-Path $script:Root 'SharePoint/Set-SiteMembersToViewers.ps1') `
                          -Parameters $parameters `
-                         -Description "move $scope$team to view-only"
+                         -Description "move $scope$team to view-only$where"
 }
 
 function Invoke-CreateCertificate {
@@ -983,7 +1009,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Key = 'owners';  Label = 'Report who owns your sites'; Tag = 'read-only'
            Detail = 'Writes a spreadsheet. Good to run before changing anything.' }
         @{ Key = 'viewers'; Label = 'Change site members to view-only'; Tag = 'changes tenant'
-           Detail = 'One site, or a list of sites from a spreadsheet.' }
+           Detail = 'One site, a list from a spreadsheet, or every site in the tenant.' }
 
         @{ Header = 'Finish' }
         @{ Key = 'quit'; Label = 'Quit' }
