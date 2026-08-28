@@ -184,7 +184,7 @@ function Read-Choice {
 
             if ($option.Tag) {
                 $pad = [Math]::Max(1, 56 - $line.Length)
-                $colour = if ($option.Tag -match 'change') { 'Yellow' } else { 'DarkGray' }
+                $colour = if ($option.Tag -match 'change|email') { 'Yellow' } else { 'DarkGray' }
 
                 Write-Host ((' ' * $pad) + $option.Tag) -ForegroundColor $colour
             }
@@ -887,6 +887,52 @@ function Invoke-ImportGuests {
                          -Description "create $count in the new tenant $email, and add them to their groups"
 }
 
+function Invoke-NotifyGuests {
+
+    Write-Banner 'Email guests you have already created'
+
+    Write-Explain @(
+        'Sends the invitation email to guests who are already in the tenant -',
+        'because you created them silently, or added them by hand - without',
+        'changing anything else.',
+        '',
+        'No group membership is touched. Anyone given extra groups since they were',
+        'migrated keeps them. No second account is created either: the existing',
+        'guest is matched on their email address and only an email is sent.',
+        '',
+        'Everyone listed in the spreadsheet is emailed, so trim it first if some of',
+        'them should not be told yet.'
+    )
+
+    Write-Step 'Which spreadsheet?'
+
+    Write-Explain @('The same export you used to create them.')
+
+    $parameters = @{
+        InputPath             = Read-Text -Prompt '   Path to the exported .csv' -Default './TenantA_GuestPermissions.csv' `
+            -Validate { param($v) Test-Path -Path $v } `
+            -ValidationMessage 'No file at that path. Check the location and try again.'
+
+        SendInvitationMessage = $true
+        ResendInvitations     = $true
+        SkipGroupMembership   = $true
+    }
+
+    Write-Step 'Anything to say to them?'
+
+    $message = Read-Text -Prompt '   Message to include in the email (press Enter to skip)' -AllowEmpty
+
+    if ($message) { $parameters['CustomInvitationMessage'] = $message }
+
+    $parameters['LogPath'] = Get-OutputPath -Prompt 'Where should the results log go?' -Default './TenantB_GuestNotify_Log.csv'
+
+    Write-Explain @('A browser will open for you to sign in to the tenant the guests are in.')
+
+    Invoke-WithRehearsal -ScriptPath (Join-Path $script:Root 'Guests/Import-GuestPermissions.ps1') `
+                         -Parameters $parameters `
+                         -Description 'email an invitation to every guest in the file, changing no group membership'
+}
+
 function Invoke-SiteOwners {
 
     Write-Banner 'Report who owns your SharePoint sites'
@@ -1202,6 +1248,8 @@ for ($loop = 0; $loop -lt 100; $loop++) {
            Detail = 'Writes a spreadsheet of guests and their groups.' }
         @{ Key = 'import'; Label = 'Step 2 - Create those guests in the new tenant'; Tag = 'changes tenant'
            Detail = 'Rehearsed first. Nothing is created until you confirm.' }
+        @{ Key = 'notify'; Label = 'Step 3 - Email guests you have already created'; Tag = 'sends email'
+           Detail = 'For guests created silently or added by hand. Changes no permissions.' }
 
         @{ Header = 'SharePoint permissions'; Note = 'Independent of the guest migration.' }
         @{ Key = 'owners';  Label = 'Report who owns your sites'; Tag = 'read-only'
@@ -1220,6 +1268,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
     switch ($task) {
         'export'  { Invoke-ExportGuests }
         'import'  { Invoke-ImportGuests }
+        'notify'  { Invoke-NotifyGuests }
         'owners'  { Invoke-SiteOwners }
         'viewers' { Invoke-MembersToViewers }
         'register' { Invoke-RegisterApp }
