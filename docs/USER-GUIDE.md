@@ -157,7 +157,15 @@ Same task, no limit this time. The pilot guests are already there, so they're sk
 >
 > Only guests *created on that run* are emailed. If you added guests by hand and now need to tell them, answer yes to **"Also email guests who already exist?"**. That sends a fresh invitation without creating a second account and without changing anyone's group memberships — worth knowing, because it is the obvious worry.
 
-### Step 6 — Handle what's left over · [Changes your tenant]
+### Step 6 — Tell the guests · [Sends email]
+
+If you created the guests silently — which is the sensible default — nothing has reached them yet. When you are ready, menu option **6**, *Email guests you have already created*.
+
+It sends the invitation email to everyone in the spreadsheet and **changes no permissions at all**. Group membership is not touched, so anyone given extra groups since they were migrated keeps them, and no second account is created: the existing guest is matched on their email address.
+
+Everyone listed in the file is emailed, so trim the spreadsheet first if some of them should not be told yet.
+
+### Step 7 — Handle what's left over · [Changes your tenant]
 
 Open `…_Unsupported.csv`. These need doing by hand, in Exchange Online PowerShell or the admin centre:
 
@@ -175,7 +183,7 @@ Independent of the guest migration — run these whenever you need them.
 
 ### Find out who owns what · [Read-only]
 
-Menu option **6**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
+Menu option **7**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
 
 "Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see Reading the reports.
 
@@ -183,7 +191,7 @@ Menu option **6**. Choose "every site in the tenant" and give it your admin URL 
 
 ### Make members read-only · [Changes your tenant]
 
-Menu option **7**. Demotes people from edit to read-only on a site, in both places access comes from:
+Menu option **8**. Demotes people from edit to read-only on a site, in both places access comes from:
 
 - **the site's Members group** — they move to Visitors
 - **permissions given to them directly on the site** — reduced to read-only
@@ -218,7 +226,7 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 
 ### List all users and their group access · [Read-only]
 
-Menu option **8**. A spreadsheet of every user in the tenant — staff and guests alike — with the groups each one belongs to.
+Menu option **9**. A spreadsheet of every user in the tenant — staff and guests alike — with the groups each one belongs to.
 
 This one shows **effective** access: a group someone reaches only through another group is included. That makes it right for a permissions review, and different on purpose from the guest export at step 1 of Part 2, which records direct memberships only.
 

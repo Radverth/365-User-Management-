@@ -85,7 +85,9 @@ Guests/Import-GuestPermissions.ps1
 
 **Guests are matched on `ExternalEmail`,** never on UPN. The same person is `alice_partner.com#EXT#@tenantA.onmicrosoft.com` in one tenant and `…@tenantB.onmicrosoft.com` in the other.
 
-**Emailing guests you added by hand.** By default only guests created on this run are emailed, so anyone already in the tenant is skipped. `-ResendInvitations` includes them.
+**Emailing guests you added by hand.** The menu does this as *Email guests you have already created*, which sets `-SendInvitationMessage`, `-ResendInvitations` and `-SkipGroupMembership` for you.
+
+By default only guests created on this run are emailed, so anyone already in the tenant is skipped. `-ResendInvitations` includes them.
 
 Re-inviting an existing guest is safe: Graph matches on the email address, reuses the existing object, and sends a fresh invitation. No second account is created and no group membership changes. Pair it with `-SkipGroupMembership` to send the emails and touch nothing else.
 
