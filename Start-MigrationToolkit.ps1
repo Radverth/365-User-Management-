@@ -842,6 +842,21 @@ function Invoke-ImportGuests {
         $message = Read-Text -Prompt '   Message to include (press Enter to skip)' -AllowEmpty
 
         if ($message) { $parameters['CustomInvitationMessage'] = $message }
+
+        Write-Host ''
+        Write-Explain @(
+            'Guests already in the tenant are not emailed by default - only ones',
+            'created on this run. Say yes below to email them too, which is what',
+            'you want if you added guests by hand and now need to tell them.',
+            '',
+            'It does not create a second account and does not disturb anyone''s',
+            'group memberships: the existing guest is matched on their email',
+            'address and only an invitation email is sent.'
+        )
+
+        if (Read-YesNo -Prompt '   Also email guests who already exist?' -Default $false) {
+            $parameters['ResendInvitations'] = $true
+        }
     }
 
     Write-Step 'How many?'
@@ -863,7 +878,9 @@ function Invoke-ImportGuests {
     Write-Explain @('A browser will open for you to sign in to the NEW tenant.')
 
     $count = if ($parameters.ContainsKey('MaxGuests')) { "up to $($parameters['MaxGuests']) guest(s)" } else { 'every guest in the file' }
-    $email = if ($parameters.ContainsKey('SendInvitationMessage')) { 'and email them an invitation' } else { 'without emailing them' }
+    $email = if ($parameters.ContainsKey('ResendInvitations')) { 'and email an invitation to every guest in the file, new or existing' }
+             elseif ($parameters.ContainsKey('SendInvitationMessage')) { 'and email each new guest an invitation' }
+             else { 'without emailing them' }
 
     Invoke-WithRehearsal -ScriptPath (Join-Path $script:Root 'Guests/Import-GuestPermissions.ps1') `
                          -Parameters $parameters `

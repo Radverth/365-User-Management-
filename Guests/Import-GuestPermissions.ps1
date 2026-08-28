@@ -39,6 +39,18 @@
 .PARAMETER TenantId
     Optional tenant ID or domain to sign in against.
 
+.PARAMETER ResendInvitations
+    Also email guests who already exist, not just ones created on this run.
+
+    Use this when guests were added to the tenant by hand, or by an earlier silent
+    run, and now need telling. Only has an effect alongside
+    -SendInvitationMessage.
+
+    Re-inviting an existing guest does not create a second account and does not
+    disturb their group memberships: the invitation is matched on the email
+    address, the existing object is reused, and only a fresh invitation email is
+    sent.
+
 .PARAMETER SkipInvitations
     Do not create missing guests; only process group membership for guests that
     already exist.
@@ -71,6 +83,13 @@
     .\Import-GuestPermissions.ps1 -InputPath .\TenantA_GuestPermissions.csv -SendInvitationMessage
 
     Full run, emailing each new guest their invitation.
+
+.EXAMPLE
+    .\Import-GuestPermissions.ps1 -InputPath .\TenantA_GuestPermissions.csv `
+        -SendInvitationMessage -ResendInvitations -SkipGroupMembership
+
+    Email everyone in the file, including guests already in the tenant, and change
+    no memberships at all. This is how you tell guests you added by hand.
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -87,6 +106,8 @@ param(
     [string]$LogPath = ".\TenantB_GuestImport_Log.csv",
 
     [string]$TenantId,
+
+    [switch]$ResendInvitations,
 
     [switch]$SkipInvitations,
 
@@ -191,10 +212,22 @@ Write-Host "Connected to tenant $($context.TenantId) as $($context.Account)" -Fo
 Write-Host ''
 
 if ($SendInvitationMessage) {
-    Write-Host 'Invitation emails WILL be sent to newly created guests.' -ForegroundColor Yellow
+
+    if ($ResendInvitations) {
+        Write-Host 'Invitation emails WILL be sent - to new guests AND to guests who already exist.' -ForegroundColor Yellow
+        Write-Host 'Existing guests keep their object and their group memberships; only an email is sent.' -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host 'Invitation emails WILL be sent to newly created guests.' -ForegroundColor Yellow
+        Write-Host 'Guests who already exist are not emailed. Add -ResendInvitations to include them.' -ForegroundColor DarkGray
+    }
 }
 else {
     Write-Host 'Invitation emails will NOT be sent. Guests are created silently.' -ForegroundColor Cyan
+
+    if ($ResendInvitations) {
+        Write-Warning '-ResendInvitations does nothing without -SendInvitationMessage, so no emails will be sent.'
+    }
 }
 
 Write-Host ''
@@ -379,8 +412,64 @@ foreach ($entry in $guestGroups) {
 
         $userId = $guestIndex[$lookupKey]
 
-        Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
-                     -Status 'AlreadyExists' -Detail "Existing object $userId reused"
+        if ($ResendInvitations -and $SendInvitationMessage) {
+
+            if ($PSCmdlet.ShouldProcess("guest $externalEmail", 'Resend invitation email')) {
+
+                try {
+                    $resendParams = @{
+                        InvitedUserEmailAddress = $externalEmail
+                        InviteRedirectUrl       = $InviteRedirectUrl
+                        SendInvitationMessage   = $true
+                        ErrorAction             = 'Stop'
+                    }
+
+                    if ($displayName) { $resendParams['InvitedUserDisplayName'] = $displayName }
+
+                    if ($CustomInvitationMessage) {
+                        $resendParams['InvitedUserMessageInfo'] = @{
+                            CustomizedMessageBody = $CustomInvitationMessage
+                        }
+                    }
+
+                    # Matched on the email address, so this reuses the existing
+                    # object rather than creating a second one, and leaves group
+                    # membership alone. Only a fresh invitation email is sent.
+                    $resent = New-MgInvitation @resendParams
+
+                    $resentId = $resent.InvitedUser.Id
+
+                    if ($resentId -and $resentId -ne $userId) {
+                        # Should not happen, but if the directory returned a
+                        # different object the operator needs to know before it
+                        # gets memberships added to it.
+                        Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                     -Status 'Failed' `
+                                     -Detail "Resend returned object $resentId but $userId was expected. Check for a duplicate guest before continuing."
+
+                        Write-Warning "Resending to $externalEmail returned a different object; skipping group work for this guest."
+                        continue
+                    }
+
+                    Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                 -Status 'InvitationResent' -Detail "Existing object $userId reused; invitation email sent"
+                }
+                catch {
+                    Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                 -Status 'Failed' -Detail "Resend failed: $($_.Exception.Message)"
+
+                    Write-Warning "Could not resend to $externalEmail : $($_.Exception.Message)"
+                }
+            }
+            else {
+                Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                             -Status 'WhatIf' -Detail "Would resend the invitation email to existing object $userId"
+            }
+        }
+        else {
+            Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                         -Status 'AlreadyExists' -Detail "Existing object $userId reused"
+        }
     }
     elseif ($SkipInvitations) {
 

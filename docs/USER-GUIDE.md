@@ -153,7 +153,9 @@ The wizard offers to start with a few guests. Take it — five is plenty. Say **
 
 Same task, no limit this time. The pilot guests are already there, so they're skipped rather than duplicated.
 
-> **The invitation email is your decision.** By default guests are created silently — they appear in the directory and can be added to groups, but receive nothing. Say yes to the email only when you're ready for people to be told. Re-running never re-mails anyone who already exists.
+> **The invitation email is your decision.** By default guests are created silently — they appear in the directory and can be added to groups, but receive nothing. Say yes to the email only when you're ready for people to be told.
+>
+> Only guests *created on that run* are emailed. If you added guests by hand and now need to tell them, answer yes to **"Also email guests who already exist?"**. That sends a fresh invitation without creating a second account and without changing anyone's group memberships — worth knowing, because it is the obvious worry.
 
 ### Step 6 — Handle what's left over · [Changes your tenant]
 
