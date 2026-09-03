@@ -236,7 +236,8 @@ function Get-ScopeDecision {
         [string]$PrincipalType,
         [bool]$IsGuest,
         [Parameter(Mandatory)][string]$Scope,
-        [bool]$AllowGroups
+        [bool]$AllowGroups,
+        [bool]$IsGroupClaim
     )
 
     # An unknown principal type is treated as a user, so the guests-only default
@@ -246,6 +247,11 @@ function Get-ScopeDecision {
     if (-not $isUser) {
 
         if ($AllowGroups) { return [PSCustomObject]@{ InScope = $true; Reason = '' } }
+
+        if ($IsGroupClaim) {
+            return [PSCustomObject]@{ InScope = $false
+                Reason = 'This is the Microsoft 365 group behind this site - the Team itself, and where most of the edit access comes from. Use -IncludeSecurityGroups to move it.' }
+        }
 
         return [PSCustomObject]@{ InScope = $false
             Reason = "Principal is a $PrincipalType, not a user. Use -IncludeSecurityGroups to include it." }
@@ -269,6 +275,19 @@ function Get-ScopeDecision {
                 Reason = 'Guest. Use -Scope Guests or -Scope Both to include guests.' }
         }
     }
+}
+
+function Test-IsGroupClaim {
+    <#  True for the Microsoft 365 group's own membership claim, which is what a
+        Teams-connected site puts in its Members group. It is the principal that
+        governs the whole team's access, so when it is skipped the report should
+        say that rather than 'a SecurityGroup'.
+
+        Members are c:0o.c|federateddirectoryclaimprovider|<group id>; owners
+        carry the same claim with _o appended, and live in the Owners group. #>
+    param([string]$Login)
+
+    return [bool]($Login -imatch '^c:0o\.c\|federateddirectoryclaimprovider\|')
 }
 
 function Test-IsGuest {
@@ -587,7 +606,8 @@ foreach ($site in $sites) {
             # group's member claim, so this is the principal that governs the whole
             # team's access to the site.
             $decision = Get-ScopeDecision -PrincipalType $type -IsGuest $guest -Scope $Scope `
-                                          -AllowGroups $IncludeSecurityGroups
+                                          -AllowGroups $IncludeSecurityGroups `
+                                          -IsGroupClaim (Test-IsGroupClaim -Login $login)
 
             if (-not $decision.InScope) {
                 Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
@@ -720,7 +740,8 @@ foreach ($site in $sites) {
             }
 
             $dDecision = Get-ScopeDecision -PrincipalType $dType -IsGuest $dGuest -Scope $Scope `
-                                           -AllowGroups $IncludeSecurityGroups
+                                           -AllowGroups $IncludeSecurityGroups `
+                                           -IsGroupClaim (Test-IsGroupClaim -Login $dLogin)
 
             if (-not $dDecision.InScope) {
                 Write-Result -Site $site -Title $dTitle -Login $dLogin -Email $dEmail -PrincipalType $dType `
@@ -833,12 +854,14 @@ if ($stillEditing.Count -gt 0) {
 
     $sawGroups = $false
     $sawUsers  = $false
+    $sawTeam   = $false
 
     foreach ($reasonGroup in ($stillEditing | Group-Object Detail | Sort-Object Count -Descending)) {
 
         Write-Host ("    {0,-4} {1}" -f $reasonGroup.Count, $reasonGroup.Name) -ForegroundColor Yellow
 
         if ($reasonGroup.Name -match 'IncludeSecurityGroups')  { $sawGroups = $true }
+        if ($reasonGroup.Name -match 'the Team itself')        { $sawTeam   = $true }
         if ($reasonGroup.Name -match '-Scope Staff|-Scope Guests') { $sawUsers = $true }
     }
 
@@ -852,9 +875,14 @@ if ($stillEditing.Count -gt 0) {
         Write-Host "  To catch them, run the same command again with: $($rerun -join ' ')" -ForegroundColor Yellow
     }
 
-    if ($sawGroups) {
-        Write-Host '  On a site connected to a Team, the entry named after the site IS the Team.' -ForegroundColor DarkGray
-        Write-Host '  Leaving it behind leaves the whole team editing, however many individuals were moved.' -ForegroundColor DarkGray
+    if ($sawTeam) {
+        Write-Host '  The Team itself was left behind. Everyone in it keeps editing these sites,' -ForegroundColor DarkGray
+        Write-Host '  however many individuals were moved - which is why the run can look like it did nothing.' -ForegroundColor DarkGray
+        Write-Host '  Moving it changes the site only. Teams chat, the group mailbox and the calendar are untouched,' -ForegroundColor DarkGray
+        Write-Host '  and group owners keep Full Control through the Owners group, which is never modified.' -ForegroundColor DarkGray
+    }
+    elseif ($sawGroups) {
+        Write-Host '  A security group was left behind, so everyone inside it keeps editing.' -ForegroundColor DarkGray
     }
 }
 
