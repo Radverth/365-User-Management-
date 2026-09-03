@@ -918,6 +918,26 @@ function Invoke-NotifyGuests {
         SkipGroupMembership   = $true
     }
 
+    Write-Step 'Have any of them already signed in?'
+
+    Write-Explain @(
+        'Microsoft only emails an invitation to a guest who has not accepted one yet.',
+        'Once a guest has accepted, asking for another invitation is accepted without',
+        'complaint but no email ever arrives. That is the usual reason for "I ran it',
+        'and nobody got anything".',
+        '',
+        'Answering yes below resets those guests so the email is delivered. They keep',
+        'their account, their groups and their app access, but the next time they open',
+        'a resource they will be asked to accept the invitation again.',
+        '',
+        'Guests who have never accepted are emailed either way, so answer no if you',
+        'are not sure - the log will tell you afterwards whether anyone was skipped.'
+    )
+
+    if (Read-YesNo -Prompt '   Re-invite guests who have already accepted') {
+        $parameters['ResetRedemption'] = $true
+    }
+
     Write-Step 'Anything to say to them?'
 
     $message = Read-Text -Prompt '   Message to include in the email (press Enter to skip)' -AllowEmpty
@@ -926,11 +946,32 @@ function Invoke-NotifyGuests {
 
     $parameters['LogPath'] = Get-OutputPath -Prompt 'Where should the results log go?' -Default './TenantB_GuestNotify_Log.csv'
 
-    Write-Explain @('A browser will open for you to sign in to the tenant the guests are in.')
+    Write-Explain @(
+        'A browser will open for you to sign in to the tenant the guests are in.',
+        '',
+        'This runs twice: first a rehearsal that sends nothing, then - once you',
+        'answer y to the question that follows it - the real thing. Pressing Enter',
+        'at that question means no, and nothing is sent.'
+    )
 
     Invoke-WithRehearsal -ScriptPath (Join-Path $script:Root 'Guests/Import-GuestPermissions.ps1') `
                          -Parameters $parameters `
                          -Description 'email an invitation to every guest in the file, changing no group membership'
+
+    Write-Explain @(
+        'Check the Status column of the log:',
+        '',
+        '   InvitationResent   Microsoft accepted it and sent the email.',
+        '   NoEmailSent        The guest had already accepted, so nothing was sent.',
+        '                      Run this step again and answer yes to re-inviting them.',
+        '   WhatIf             The rehearsal only. Nothing was sent - run it again and',
+        '                      answer y when asked to go ahead.',
+        '   Failed             Microsoft rejected it. The Detail column says why.',
+        '',
+        'If the log says InvitationResent and the guest still has nothing, the email',
+        'left Microsoft and the delay is at their end - it comes from Microsoft',
+        'Invitations, so junk mail and quarantine are the places to look.'
+    )
 }
 
 function Invoke-SiteOwners {

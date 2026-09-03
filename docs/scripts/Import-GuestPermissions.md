@@ -30,6 +30,7 @@ Guests/Import-GuestPermissions.ps1
 | `-LogPath` | string | `.\TenantB_GuestImport_Log.csv` | Outcome of every action |
 | `-TenantId` | string | — | Tenant ID or domain to sign in against |
 | `-ResendInvitations` | switch | off | Also email guests who already exist, not just ones created on this run. Needs `-SendInvitationMessage` |
+| `-ResetRedemption` | switch | off | Also reach guests who have **already accepted**, by resetting their redemption so Microsoft sends the email. Needs `-SendInvitationMessage` and `-ResendInvitations` |
 | `-SkipInvitations` | switch | off | Do not create missing guests; only fix up membership for guests that already exist |
 | `-SkipGroupMembership` | switch | off | Only create the guests |
 | `-SkipOwnership` | switch | off | Add guests as members but never as group owners |
@@ -55,6 +56,11 @@ Guests/Import-GuestPermissions.ps1
 # Email everyone in the file, including guests added by hand, and change nothing else
 ./Import-GuestPermissions.ps1 -InputPath ./guests.csv `
     -SendInvitationMessage -ResendInvitations -SkipGroupMembership
+
+# The same, but guests who have already accepted are reset first so the email is
+# actually delivered. Memberships are still untouched.
+./Import-GuestPermissions.ps1 -InputPath ./guests.csv `
+    -SendInvitationMessage -ResendInvitations -ResetRedemption -SkipGroupMembership
 ```
 
 ---
@@ -93,7 +99,25 @@ Re-inviting an existing guest is safe: Graph matches on the email address, reuse
 
 As a guard against the one thing that would be dangerous, the object returned by the resend is compared against the one already indexed. If they differ — which would mean a duplicate guest exists — the row is logged `Failed` and group work for that guest is skipped rather than applied to the wrong object.
 
-For a guest who has already redeemed and needs their sign-in identity reset, that is a different operation: Microsoft's `resetRedemption` on the invitation API, which also retains the object ID, memberships and app assignments. This script does not do that.
+**Guests who have already accepted get no email — unless you reset them.** This is the single most common reason for "I ran it and nobody received anything".
+
+Microsoft only delivers an invitation to a guest whose external state is still `PendingAcceptance`. Ask for another invitation for a guest who has already accepted and the request succeeds, returns the same object, and sends nothing at all. There is no error to notice.
+
+The script reads each guest's `ExternalUserState` up front and reports that case honestly rather than claiming a send that did not happen:
+
+| Log status | What it means |
+|---|---|
+| `InvitationResent` | Microsoft accepted the request and sent the email |
+| `NoEmailSent` | The guest had already accepted, so nothing was sent. Add `-ResetRedemption` |
+| `AlreadyExists` | The guest was reused, nothing emailed — `-ResendInvitations` was not set |
+| `WhatIf` | Rehearsal only. Nothing was sent |
+| `Failed` | Microsoft rejected the request. The `Detail` column says why |
+
+The run also finishes with a plain-language count of the guests that received nothing, and lists them.
+
+`-ResetRedemption` uses Microsoft's `resetRedemption` on the invitation API, naming the guest object that was matched. The guest keeps their object ID, their group memberships and their app assignments; what they lose is the redemption itself, so the next time they open a resource they are asked to accept the invitation again — and must do so with the address in the file. It is applied only to guests actually sitting at `Accepted`; anyone still pending is emailed the ordinary way.
+
+`-ResetRedemption` needs a recent `Microsoft.Graph.Identity.SignIns`. If the installed module is too old the script says so and stops **before** sending anything, rather than failing part-way through the file.
 
 **A rehearsal is a real check.** Under `-WhatIf` no object is created, but every group name is still resolved against the target tenant and the log records `GroupNotFound` for any that are missing. That is the cheapest moment to find them.
 

@@ -51,6 +51,23 @@
     address, the existing object is reused, and only a fresh invitation email is
     sent.
 
+.PARAMETER ResetRedemption
+    Also reset the redemption status of guests who have already accepted their
+    invitation, so that Microsoft sends them a fresh invitation email.
+
+    Only has an effect alongside -SendInvitationMessage and -ResendInvitations.
+
+    Why this exists: Microsoft only emails an invitation to a guest whose state is
+    still PendingAcceptance. Once a guest has accepted, asking for another
+    invitation succeeds but no email is delivered. Resetting redemption puts the
+    guest back into PendingAcceptance so the email is sent.
+
+    The guest keeps their object ID, their group memberships and their app
+    assignments. What they lose is the redemption itself: the next time they open
+    a resource they must accept the invitation again, and they must do so with the
+    address in the file. Leave this off unless the log shows guests stuck at
+    Accepted and they genuinely need re-inviting.
+
 .PARAMETER SkipInvitations
     Do not create missing guests; only process group membership for guests that
     already exist.
@@ -90,6 +107,13 @@
 
     Email everyone in the file, including guests already in the tenant, and change
     no memberships at all. This is how you tell guests you added by hand.
+
+.EXAMPLE
+    .\Import-GuestPermissions.ps1 -InputPath .\TenantA_GuestPermissions.csv `
+        -SendInvitationMessage -ResendInvitations -ResetRedemption -SkipGroupMembership
+
+    The same, but guests who have already accepted are reset to PendingAcceptance
+    first so Microsoft actually delivers the email. Memberships are kept.
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -108,6 +132,8 @@ param(
     [string]$TenantId,
 
     [switch]$ResendInvitations,
+
+    [switch]$ResetRedemption,
 
     [switch]$SkipInvitations,
 
@@ -216,6 +242,15 @@ if ($SendInvitationMessage) {
     if ($ResendInvitations) {
         Write-Host 'Invitation emails WILL be sent - to new guests AND to guests who already exist.' -ForegroundColor Yellow
         Write-Host 'Existing guests keep their object and their group memberships; only an email is sent.' -ForegroundColor DarkGray
+
+        if ($ResetRedemption) {
+            Write-Host 'Guests who have already accepted will be reset to PendingAcceptance so the email is delivered.' -ForegroundColor Yellow
+            Write-Host 'They keep their object, groups and app assignments, but must accept the invitation again.' -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host 'Guests who have already ACCEPTED will not receive anything: Microsoft only emails' -ForegroundColor DarkGray
+            Write-Host 'guests still at PendingAcceptance. Add -ResetRedemption to reach those as well.' -ForegroundColor DarkGray
+        }
     }
     else {
         Write-Host 'Invitation emails WILL be sent to newly created guests.' -ForegroundColor Yellow
@@ -227,6 +262,31 @@ else {
 
     if ($ResendInvitations) {
         Write-Warning '-ResendInvitations does nothing without -SendInvitationMessage, so no emails will be sent.'
+    }
+
+    if ($ResetRedemption) {
+        Write-Warning '-ResetRedemption does nothing without -SendInvitationMessage, so no redemption is reset.'
+    }
+}
+
+if ($ResetRedemption -and $SendInvitationMessage -and -not $ResendInvitations) {
+    Write-Warning '-ResetRedemption only applies to guests who already exist, so add -ResendInvitations too.'
+}
+
+# Resetting redemption needs two properties the older SDK builds do not expose.
+# Better to say so now than to fail once a run is part-way through the file.
+$resetSupported = $false
+
+if ($ResetRedemption) {
+
+    $inviteCmd = Get-Command -Name New-MgInvitation -ErrorAction SilentlyContinue
+
+    $resetSupported = $null -ne $inviteCmd -and
+                      $inviteCmd.Parameters.ContainsKey('ResetRedemption') -and
+                      $inviteCmd.Parameters.ContainsKey('InvitedUser')
+
+    if (-not $resetSupported) {
+        throw '-ResetRedemption needs a newer Microsoft.Graph.Identity.SignIns module. Run: Update-Module Microsoft.Graph.Identity.SignIns'
     }
 }
 
@@ -242,7 +302,7 @@ $guestIndex = @{}
 
 $existingGuests = @(
     Get-MgUser -All -Filter "userType eq 'Guest'" -ConsistencyLevel eventual -CountVariable existingGuestCount -Property @(
-        'Id', 'DisplayName', 'UserPrincipalName', 'Mail', 'OtherMails', 'UserType'
+        'Id', 'DisplayName', 'UserPrincipalName', 'Mail', 'OtherMails', 'UserType', 'ExternalUserState'
     )
 )
 
@@ -262,7 +322,12 @@ foreach ($guest in $existingGuests) {
     foreach ($key in $keys) {
         $normalised = $key.Trim().ToLowerInvariant()
         if ($normalised -and -not $guestIndex.ContainsKey($normalised)) {
-            $guestIndex[$normalised] = $guest.Id
+            # The redemption state decides whether Microsoft will actually deliver
+            # a fresh invitation email, so it travels with the object ID.
+            $guestIndex[$normalised] = [pscustomobject]@{
+                Id    = $guest.Id
+                State = $guest.ExternalUserState
+            }
         }
     }
 }
@@ -346,6 +411,10 @@ function Get-GroupOwnerSet {
 
 $log = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+# Guests asked to be emailed who had already redeemed, so Microsoft sent nothing.
+# Collected separately because it is the one outcome that looks like success.
+$acceptedNotReset = [System.Collections.Generic.List[string]]::new()
+
 function Write-Result {
     param(
         [string]$ExternalEmail,
@@ -410,11 +479,24 @@ foreach ($entry in $guestGroups) {
 
     if ($guestIndex.ContainsKey($lookupKey)) {
 
-        $userId = $guestIndex[$lookupKey]
+        $existing    = $guestIndex[$lookupKey]
+        $userId      = $existing.Id
+        $guestState  = if ($existing.State) { $existing.State } else { 'Unknown' }
+
+        # Microsoft only delivers an invitation email to a guest still sitting at
+        # PendingAcceptance. An already-redeemed guest accepts the request and
+        # sends nothing, which looks exactly like a silent failure - so the state
+        # goes in the log either way.
+        $alreadyRedeemed = $guestState -eq 'Accepted'
 
         if ($ResendInvitations -and $SendInvitationMessage) {
 
-            if ($PSCmdlet.ShouldProcess("guest $externalEmail", 'Resend invitation email')) {
+            $willReset = $alreadyRedeemed -and $ResetRedemption
+
+            $action = if ($willReset) { 'Reset redemption and resend invitation email' }
+                      else            { 'Resend invitation email' }
+
+            if ($PSCmdlet.ShouldProcess("guest $externalEmail", $action)) {
 
                 try {
                     $resendParams = @{
@@ -430,6 +512,14 @@ foreach ($entry in $guestGroups) {
                         $resendParams['InvitedUserMessageInfo'] = @{
                             CustomizedMessageBody = $CustomInvitationMessage
                         }
+                    }
+
+                    if ($willReset) {
+                        # Naming the existing object keeps the reset pinned to the
+                        # guest we matched. Their ID, groups and app assignments
+                        # survive; only the redemption itself is undone.
+                        $resendParams['ResetRedemption'] = $true
+                        $resendParams['InvitedUser']     = @{ Id = $userId }
                     }
 
                     # Matched on the email address, so this reuses the existing
@@ -451,8 +541,27 @@ foreach ($entry in $guestGroups) {
                         continue
                     }
 
-                    Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
-                                 -Status 'InvitationResent' -Detail "Existing object $userId reused; invitation email sent"
+                    if ($willReset) {
+                        $guestIndex[$lookupKey].State = 'PendingAcceptance'
+
+                        Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                     -Status 'InvitationResent' `
+                                     -Detail "Existing object $userId reused; was Accepted, reset to PendingAcceptance and invitation email sent"
+                    }
+                    elseif ($alreadyRedeemed) {
+                        # Graph accepted it, but nothing lands in their inbox. Say
+                        # so plainly rather than reporting a send that did not happen.
+                        [void]$acceptedNotReset.Add($externalEmail)
+
+                        Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                     -Status 'NoEmailSent' `
+                                     -Detail "Existing object $userId has already accepted (state Accepted), so Microsoft sends no email. Re-run with -ResetRedemption to reach them."
+                    }
+                    else {
+                        Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
+                                     -Status 'InvitationResent' `
+                                     -Detail "Existing object $userId reused; state was $guestState; invitation email sent"
+                    }
                 }
                 catch {
                     Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
@@ -462,13 +571,25 @@ foreach ($entry in $guestGroups) {
                 }
             }
             else {
+                $detail = if ($willReset) {
+                    "Would reset redemption on existing object $userId (state $guestState) and email the invitation"
+                }
+                elseif ($alreadyRedeemed) {
+                    "Existing object $userId has already accepted, so no email would be delivered. Re-run with -ResetRedemption to reach them."
+                }
+                else {
+                    "Would resend the invitation email to existing object $userId (state $guestState)"
+                }
+
+                if ($alreadyRedeemed -and -not $ResetRedemption) { [void]$acceptedNotReset.Add($externalEmail) }
+
                 Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
-                             -Status 'WhatIf' -Detail "Would resend the invitation email to existing object $userId"
+                             -Status 'WhatIf' -Detail $detail
             }
         }
         else {
             Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
-                         -Status 'AlreadyExists' -Detail "Existing object $userId reused"
+                         -Status 'AlreadyExists' -Detail "Existing object $userId reused; state $guestState"
         }
     }
     elseif ($SkipInvitations) {
@@ -505,7 +626,10 @@ foreach ($entry in $guestGroups) {
                 $userId = $invitation.InvitedUser.Id
 
                 # Keep the index current so a duplicate row later in the file is a hit.
-                $guestIndex[$lookupKey] = $userId
+                $guestIndex[$lookupKey] = [pscustomobject]@{
+                    Id    = $userId
+                    State = 'PendingAcceptance'
+                }
 
                 Write-Result -ExternalEmail $externalEmail -DisplayName $displayName -Action 'Invite' `
                              -Status 'Created' -Detail "New object $userId; email sent: $([bool]$SendInvitationMessage)"
@@ -681,6 +805,22 @@ Write-Host "  Log : $((Resolve-Path -Path $LogPath).Path)" -ForegroundColor Gree
 
 if ($failures.Count -gt 0) {
     Write-Host "  $($failures.Count) action(s) failed - see the log for details." -ForegroundColor Red
+}
+
+if ($acceptedNotReset.Count -gt 0) {
+    Write-Host ''
+    Write-Host "  $($acceptedNotReset.Count) guest(s) received NO email because they have already accepted" -ForegroundColor Yellow
+    Write-Host '  their invitation. Microsoft only emails guests still at PendingAcceptance.' -ForegroundColor Yellow
+    Write-Host '  To reach them, re-run the same command with -ResetRedemption added.' -ForegroundColor Yellow
+    Write-Host '  They keep their object, groups and app assignments, but must accept again.' -ForegroundColor DarkGray
+
+    foreach ($address in ($acceptedNotReset | Select-Object -First 10)) {
+        Write-Host "    $address" -ForegroundColor DarkGray
+    }
+
+    if ($acceptedNotReset.Count -gt 10) {
+        Write-Host "    ... and $($acceptedNotReset.Count - 10) more - see the log." -ForegroundColor DarkGray
+    }
 }
 
 Disconnect-MgGraph | Out-Null

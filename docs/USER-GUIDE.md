@@ -155,7 +155,7 @@ Same task, no limit this time. The pilot guests are already there, so they're sk
 
 > **The invitation email is your decision.** By default guests are created silently — they appear in the directory and can be added to groups, but receive nothing. Say yes to the email only when you're ready for people to be told.
 >
-> Only guests *created on that run* are emailed. If you added guests by hand and now need to tell them, answer yes to **"Also email guests who already exist?"**. That sends a fresh invitation without creating a second account and without changing anyone's group memberships — worth knowing, because it is the obvious worry.
+> Only guests *created on that run* are emailed. If you added guests by hand and now need to tell them, use menu option **6** instead. That sends a fresh invitation without creating a second account and without changing anyone's group memberships — worth knowing, because it is the obvious worry.
 
 ### Step 6 — Tell the guests · [Sends email]
 
@@ -164,6 +164,27 @@ If you created the guests silently — which is the sensible default — nothing
 It sends the invitation email to everyone in the spreadsheet and **changes no permissions at all**. Group membership is not touched, so anyone given extra groups since they were migrated keeps them, and no second account is created: the existing guest is matched on their email address.
 
 Everyone listed in the file is emailed, so trim the spreadsheet first if some of them should not be told yet.
+
+#### If nobody receives anything
+
+Two things account for almost every case.
+
+**1. The confirmation was not answered.** Every step that changes something runs twice: a rehearsal that sends nothing, then the real thing. In between you are asked *Go ahead and make these changes?* and the answer defaults to **no**, so pressing Enter sends nothing. You have to type `y`.
+
+**2. The guest has already accepted.** Microsoft only emails an invitation to a guest who has not accepted one yet. Ask for another one for a guest who has already signed in, and the request succeeds quietly and no email is ever sent. Nothing looks wrong.
+
+Step 6 asks *Re-invite guests who have already accepted*. Answering yes resets those guests so the email is delivered. They keep their account, their groups and their app access, but the next time they open a resource they are asked to accept the invitation again — and must do so with the address in the spreadsheet. Guests who have never accepted are emailed either way, so answering no is safe: the log tells you afterwards whether anyone was skipped.
+
+**Read the log to tell which happened.** Open the results file and look at the `Status` column:
+
+| Status | Meaning |
+|---|---|
+| `InvitationResent` | Microsoft accepted it and sent the email |
+| `NoEmailSent` | The guest had already accepted. Run step 6 again and answer yes to re-inviting them |
+| `WhatIf` | The rehearsal only. Nothing was sent — run it again and answer `y` when asked |
+| `Failed` | Microsoft rejected it. The `Detail` column says why |
+
+If the log says `InvitationResent` and the guest still has nothing, the email left Microsoft and the problem is at their end. It arrives from Microsoft Invitations, so junk mail, quarantine and the recipient's own tenant filtering are the places to look.
 
 ### Step 7 — Handle what's left over · [Changes your tenant]
 
