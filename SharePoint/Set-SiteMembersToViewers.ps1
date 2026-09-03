@@ -82,6 +82,35 @@
     -Scope still applies, so the default of Guests adds only the group's guests.
     -ExcludeLogin still protects individuals.
 
+.PARAMETER RemoveFromMicrosoft365Group
+    After adding them to Visitors by name, also remove those people from the
+    connected Microsoft 365 group.
+
+    Needs -AddGroupMembersAsVisitors, and will not run without it: taking someone
+    out of the group before granting them read would leave them with no access at
+    all.
+
+    Why you would want it: on a group-connected site the Site permissions panel
+    lists "Site members" from the Microsoft 365 group itself, not from the
+    SharePoint Members group. While somebody is in the group they appear there
+    whatever the SharePoint groups say, so this is the only way to clear them from
+    that list.
+
+    What it costs. This is not a SharePoint permission change. Leaving the group
+    also removes them from:
+
+      - the Team, its chat and all its channels
+      - the group mailbox and anything in it
+      - the group calendar
+      - Planner, and anything else attached to the group
+
+    Owners of the group are never removed, whatever else is asked for - a
+    Microsoft 365 group has to keep at least one, and losing ownership is not a
+    demotion. They are reported and left alone.
+
+    Each removal is confirmed individually, and only after the person is verified
+    to be in Visitors. Off by default and worth a rehearsal first.
+
 .PARAMETER IncludeOtherGroups
     Also empty every other SharePoint group on the site into Visitors, not just
     the associated Members group.
@@ -199,6 +228,8 @@ param(
     [switch]$IncludeInternalUsers,
 
     [switch]$AddGroupMembersAsVisitors,
+
+    [switch]$RemoveFromMicrosoft365Group,
 
     [switch]$IncludeOtherGroups,
 
@@ -417,7 +448,10 @@ else {
 if ($AddGroupMembersAsVisitors) {
 
     Write-Host 'Members of the connected Microsoft 365 group will be added to Visitors by name.' -ForegroundColor Cyan
-    Write-Host 'Nobody is removed from the group - group membership is never modified.' -ForegroundColor DarkGray
+
+    if (-not $RemoveFromMicrosoft365Group) {
+        Write-Host 'Nobody is removed from the group - group membership is never modified.' -ForegroundColor DarkGray
+    }
 
     # SharePoint grants the union of everything a person holds, so read added by
     # name is invisible next to edit still coming through the group. Saying this
@@ -428,6 +462,21 @@ if ($AddGroupMembersAsVisitors) {
         Write-Warning 'SharePoint gives each person the highest permission they hold, from any source.'
         Write-Warning 'Add -IncludeSecurityGroups to move that entry to Visitors as well.'
     }
+}
+
+if ($RemoveFromMicrosoft365Group) {
+
+    if (-not $AddGroupMembersAsVisitors) {
+        throw '-RemoveFromMicrosoft365Group needs -AddGroupMembersAsVisitors. Taking someone out of the group before granting them read would leave them with no access to the site at all.'
+    }
+
+    Write-Host ''
+    Write-Warning 'People will be REMOVED from the connected Microsoft 365 group.'
+    Write-Warning 'That is not a SharePoint change. Leaving the group also removes them from the Team'
+    Write-Warning 'and its channels, the group mailbox, the group calendar and anything else attached to it.'
+    Write-Warning 'They are added to Visitors first, so they keep read access to the site.'
+    Write-Warning 'Owners of the group are never removed.'
+    Write-Host ''
 }
 
 if (-not $RemoveFromMembers) {
@@ -743,7 +792,8 @@ foreach ($site in $sites) {
         }
         else {
 
-            $groupMembers = @()
+            $groupMembers  = @()
+            $ownersUnknown = $false
 
             try {
                 $groupMembers = @(Get-PnPMicrosoft365GroupMember -Identity $groupId -ErrorAction Stop)
@@ -755,6 +805,32 @@ foreach ($site in $sites) {
             }
 
             Write-Host "  $($groupMembers.Count) member(s) in the connected Microsoft 365 group." -ForegroundColor DarkGray
+
+            # Owners are never removed: a Microsoft 365 group has to keep at least
+            # one, and losing ownership is not a demotion. Read once, by login, so
+            # an owner who is also a member is recognised.
+            $groupOwnerLogins = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+            if ($RemoveFromMicrosoft365Group) {
+                try {
+                    foreach ($owner in @(Get-PnPMicrosoft365GroupOwner -Identity $groupId -ErrorAction Stop)) {
+
+                        $ownerLogin = [string]$owner.UserPrincipalName
+
+                        if (-not $ownerLogin) { $ownerLogin = [string]$owner.Mail }
+                        if ($ownerLogin) { [void]$groupOwnerLogins.Add($ownerLogin) }
+                    }
+                }
+                catch {
+                    # Without the owner list a removal could take out the last
+                    # owner, so the removals are abandoned rather than guessed at.
+                    Write-Warning "  Could not read the group's owners, so nobody will be removed from it: $($_.Exception.Message)"
+                    Write-Result -Site $site -SourceGroup 'Microsoft 365 group' -Status 'Failed' `
+                                 -Detail "Group owners could not be read, so no removals were attempted: $($_.Exception.Message)"
+
+                    $ownersUnknown = $true
+                }
+            }
 
             foreach ($member in $groupMembers) {
 
@@ -797,14 +873,18 @@ foreach ($site in $sites) {
                     continue
                 }
 
+                # True once this person is known to hold Read on the site, which is
+                # what makes removing them from the group safe to attempt.
+                $gInVisitors = $false
+
                 if ($existingVisitors.Contains($gLogin)) {
                     Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
                                  -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'AlreadyVisitor' `
                                  -Detail 'Already in the Visitors group'
-                    continue
-                }
 
-                if ($PSCmdlet.ShouldProcess("$gTitle on $site", 'Add to Visitors by name')) {
+                    $gInVisitors = $true
+                }
+                elseif ($PSCmdlet.ShouldProcess("$gTitle on $site", 'Add to Visitors by name')) {
 
                     try {
                         Add-PnPGroupMember -Identity $visitorsGroup -LoginName $gLogin -ErrorAction Stop
@@ -813,9 +893,10 @@ foreach ($site in $sites) {
 
                         Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
                                      -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'AddedToVisitors' `
-                                     -Detail 'Added by name from the connected Microsoft 365 group; group membership unchanged'
+                                     -Detail 'Added by name from the connected Microsoft 365 group'
 
                         $moved++
+                        $gInVisitors = $true
                     }
                     catch {
                         Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
@@ -828,7 +909,59 @@ foreach ($site in $sites) {
                 else {
                     Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
                                  -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'WhatIf' `
-                                 -Detail 'Would add to Visitors by name; nobody is removed from the group'
+                                 -Detail $(if ($RemoveFromMicrosoft365Group) {
+                                     'Would add to Visitors by name, then remove from the Microsoft 365 group'
+                                 } else {
+                                     'Would add to Visitors by name; nobody is removed from the group'
+                                 })
+
+                    # The row above already covers the removal, and Visitors access
+                    # is not granted in a rehearsal, so falling through would report
+                    # a skip that means nothing.
+                    continue
+                }
+
+                if (-not $RemoveFromMicrosoft365Group) { continue }
+
+                if ($ownersUnknown) { continue }
+
+                # Read first, group second. Never the other way round: a failed add
+                # followed by a removal would leave them with no access at all.
+                if (-not $gInVisitors) {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'Skipped' `
+                                 -Detail 'Not removed from the group, because Visitors access could not be confirmed first'
+                    continue
+                }
+
+                if ($groupOwnerLogins.Contains($gLogin)) {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'OwnerKept' `
+                                 -Detail 'Owner of the Microsoft 365 group, so left in it. Change the group''s ownership first if they should not be an owner.'
+                    continue
+                }
+
+                if ($PSCmdlet.ShouldProcess("$gTitle", "Remove from the Microsoft 365 group behind $site")) {
+
+                    try {
+                        Remove-PnPMicrosoft365GroupMember -Identity $groupId -Users $gLogin -ErrorAction Stop
+
+                        Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                     -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'RemovedFromGroup' `
+                                     -Detail 'Removed from the Microsoft 365 group; keeps read access to the site through Visitors. Team, group mailbox and calendar access are gone.'
+                    }
+                    catch {
+                        Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                     -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'Failed' `
+                                     -Detail "In Visitors, but removal from the Microsoft 365 group failed: $($_.Exception.Message)"
+
+                        Write-Warning "  $gTitle : $($_.Exception.Message)"
+                    }
+                }
+                else {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'WhatIf' `
+                                 -Detail 'Would remove from the Microsoft 365 group'
                 }
             }
         }

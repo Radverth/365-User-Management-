@@ -39,6 +39,7 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `-Scope` | `Guests` / `Staff` / `Both` | `Guests` | Who to demote. Applies to group membership and direct permissions alike |
 | `-IncludeOtherGroups` | switch | off | Also empty every other SharePoint group on the site into Visitors — see below |
 | `-AddGroupMembersAsVisitors` | switch | off | On a group-connected site, add each Microsoft 365 group member to Visitors by name — see below |
+| `-RemoveFromMicrosoft365Group` | switch | off | **Destructive.** Then remove those people from the group. Needs `-AddGroupMembersAsVisitors` — see below |
 | `-SkipDirectPermissions` | switch | off | Only fix group membership, leaving direct site permissions untouched |
 | `-IncludeInternalUsers` | switch | off | Superseded by `-Scope Both` and equivalent to it. Still accepted so existing commands work |
 | `-IncludeSecurityGroups` | switch | off | Also demote group principals inside Members — see below |
@@ -112,6 +113,8 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `Info` | Group-connected site notice |
 | `GroupSkipped` | A group was empty, or the site is not group-connected, so there was nothing to do |
 | `NotAdded` | A Microsoft 365 group member was out of `-Scope`, so was not added to Visitors. Not an edit-access finding |
+| `RemovedFromGroup` | Removed from the Microsoft 365 group, keeping read access to the site through Visitors |
+| `OwnerKept` | An owner of the group, so left in it — owners are never removed |
 | `SiteSkipped` / `SiteFailed` | The whole site could not be processed |
 | `Failed` | The move failed — read `Detail` |
 | `WhatIf` | Rehearsal only |
@@ -155,6 +158,20 @@ With this switch, each member of the connected group is added to Visitors **by n
 - **A member the directory would not resolve** is logged `Failed` naming the Graph permission needed, rather than failing with an opaque error.
 
 **On its own it reduces nobody's access.** SharePoint grants each person the *highest* permission they hold from any source, so read added by name counts for nothing while the group's own entry still holds Edit in the Members group. Use it with `-IncludeSecurityGroups`, which moves that entry to Visitors — the script warns if you run it without.
+
+**`-RemoveFromMicrosoft365Group` is the only way to clear somebody from "Site members".** On a group-connected site the Site permissions panel lists *Site members* from the Microsoft 365 group itself, not from the SharePoint Members group. While somebody is in the group they appear there whatever the SharePoint groups say — which is why moving the claim and adding them to Visitors leaves them showing in both lists.
+
+This removes them from the group, so that entry goes.
+
+**It is not a SharePoint permission change.** Leaving the group also removes them from the Team and its channels, the group mailbox, the group calendar, and anything else attached to the group. Do not reach for it to fix a permissions problem — reach for it when the person genuinely should not be in the Team.
+
+Five things constrain it:
+
+- **It needs `-AddGroupMembersAsVisitors`** and refuses to run without it. Read access is granted first, so nobody is ever left with nothing.
+- **Nobody is removed until they are confirmed in Visitors.** If the add failed, the removal is skipped and logged.
+- **Owners are never removed** — a Microsoft 365 group must keep at least one, and losing ownership is not a demotion. They are logged `OwnerKept`.
+- **If the owner list cannot be read, no removals are attempted at all** rather than risking the last owner.
+- **Each removal is confirmed individually** and `-WhatIf` performs none.
 
 **On a Teams site, `-IncludeSecurityGroups` is the one that matters.** The Members group of a group-connected site holds the connected group's *member claim*, shown in the admin centre as **"&lt;Site&gt; Members"**. Moving that single principal to Visitors makes the whole team read-only on the site at once, including people who join the group later.
 

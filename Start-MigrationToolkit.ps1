@@ -1162,7 +1162,28 @@ function Invoke-MembersToViewers {
     )
 
     if (Read-YesNo -Prompt '   Also add each member of the Team to Visitors by name' -Default $false) {
+
         $parameters['AddGroupMembersAsVisitors'] = $true
+
+        Write-Host ''
+        Write-Explain @(
+            'On a group-connected site, the Site permissions panel lists "Site',
+            'members" from the Team itself, not from the SharePoint Members group.',
+            'While somebody is in the Team they appear there whatever you do to the',
+            'SharePoint groups, so the only way to clear them from that list is to',
+            'take them out of the Team.',
+            '',
+            'That is not a SharePoint change. Leaving the Team also removes them',
+            'from its chat and channels, the group mailbox, the group calendar and',
+            'anything else attached to the group. They keep read access to the',
+            'site, because they are added to Visitors first.',
+            '',
+            'Owners of the Team are never removed - they are reported and left.'
+        )
+
+        if (Read-YesNo -Prompt '   Remove them from the Team as well' -Default $false) {
+            $parameters['RemoveFromMicrosoft365Group'] = $true
+        }
     }
 
     Write-Step 'Anyone to leave alone?'

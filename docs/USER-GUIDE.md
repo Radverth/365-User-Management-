@@ -280,6 +280,10 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 >
 > Answer yes to *Also add each member of the Team to Visitors by name* and every member of the Team is added to Visitors individually, so their read access stands on its own. **Nothing is removed and nobody leaves the Team** — they are only added. Worth doing if the Team's access to the site is going to change or go away and those people still need to read it.
 
+> **They will still show under "Site members" — that list comes from the Team.** On a group-connected site the Site permissions panel reads *Site members* from the Microsoft 365 group itself, not from the SharePoint Members group. While somebody is in the Team they appear there whatever you do to the SharePoint groups, so demoting them and adding them to Visitors leaves them in both lists. Their actual permission on the site is Read — the list is showing group membership, not access.
+>
+> To clear them from that list they have to leave the Team. Answer yes to *Remove them from the Team as well*. **This is not a permissions change:** leaving the Team also removes them from its chat and channels, the group mailbox and the group calendar. They keep read access to the site, because they are added to Visitors first, and **owners of the Team are never removed**.
+
 > **Anyone left with edit access is named at the end of the run,** grouped by the reason, with the exact command to re-run. If people are still in Members afterwards, that is where it says why — there are only two possible causes, and both name the answer you need to change.
 
 ---
