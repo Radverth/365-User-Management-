@@ -142,6 +142,8 @@ Everything else applies unchanged: `-Scope` still decides who is in scope, `-Exc
 
 Permission levels already meaning read-only (`Read`, `View Only`, `Restricted View`, `Restricted Read`) are left as they are and logged as `AlreadyReadOnly`. Custom levels are treated as edit-capable, so a custom read-only level would be replaced with `Read` — check the rehearsal if you use one.
 
+**If people are still in Members afterwards, the run told you why.** Every principal left behind is logged `Skipped` with the switch that would have caught it, and the run ends by grouping those reasons and printing the exact command to re-run. There are only two reasons: the principal is out of `-Scope` (the default is `Guests`, so your own staff are left alone), or it is a group rather than a person and `-IncludeSecurityGroups` was not set.
+
 **On a Teams site, `-IncludeSecurityGroups` is the one that matters.** The Members group of a group-connected site holds the connected group's *member claim*, shown in the admin centre as **"&lt;Site&gt; Members"**. Moving that single principal to Visitors makes the whole team read-only on the site at once, including people who join the group later.
 
 Microsoft 365 group membership itself is never modified — deliberately. Removing someone there would also strip their Teams chat, group mailbox and calendar. The script flags group-connected sites in the log with an `Info` row so you can review them.

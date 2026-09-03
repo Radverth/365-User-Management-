@@ -658,6 +658,13 @@ foreach ($site in $sites) {
                     Write-Warning "  $title : $($_.Exception.Message)"
                 }
             }
+            else {
+                # Reached under -WhatIf by somebody already in Visitors, who never
+                # went through the add branch and so has said nothing yet.
+                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'WhatIf' `
+                             -Detail "Would remove from $sourceLabel; already in Visitors"
+            }
         }
     }
 
@@ -775,6 +782,30 @@ foreach ($site in $sites) {
 
     Write-Host "  Demoted: $moved   Left alone: $skipped" -ForegroundColor Green
 
+    # Anyone still holding Edit is the thing the operator came here to remove, so
+    # it is said out loud rather than left for the log to reveal afterwards.
+    $leftBehind = @($log | Where-Object {
+        $_.SiteUrl -eq $site -and $_.Status -eq 'Skipped' -and ($_.PrincipalName -or $_.LoginName)
+    })
+
+    if ($leftBehind.Count -gt 0) {
+
+        $stillWord = if ($leftBehind.Count -eq 1) { 'principal still has' } else { 'principals still have' }
+
+        Write-Host "  $($leftBehind.Count) $stillWord edit access on this site:" -ForegroundColor Yellow
+
+        foreach ($reasonGroup in ($leftBehind | Group-Object Detail | Sort-Object Count -Descending)) {
+
+            $names = @($reasonGroup.Group | ForEach-Object { if ($_.PrincipalName) { $_.PrincipalName } else { $_.LoginName } })
+            $shown = ($names | Select-Object -First 4) -join ', '
+
+            if ($names.Count -gt 4) { $shown += ", and $($names.Count - 4) more" }
+
+            Write-Host "    $shown" -ForegroundColor Yellow
+            Write-Host "      $($reasonGroup.Name)" -ForegroundColor DarkGray
+        }
+    }
+
 }
 
 # One disconnect at the end. Doing it per site drops the token context and makes
@@ -791,6 +822,40 @@ Write-Host '--- Summary ---' -ForegroundColor Green
 
 $log | Group-Object Status | Sort-Object Name | ForEach-Object {
     Write-Host ("  {0,-22} {1}" -f $_.Name, $_.Count)
+}
+
+$stillEditing = @($log | Where-Object { $_.Status -eq 'Skipped' -and ($_.PrincipalName -or $_.LoginName) })
+
+if ($stillEditing.Count -gt 0) {
+
+    Write-Host ''
+    Write-Host "  $($stillEditing.Count) principal(s) were left with edit access. Why, and what to add:" -ForegroundColor Yellow
+
+    $sawGroups = $false
+    $sawUsers  = $false
+
+    foreach ($reasonGroup in ($stillEditing | Group-Object Detail | Sort-Object Count -Descending)) {
+
+        Write-Host ("    {0,-4} {1}" -f $reasonGroup.Count, $reasonGroup.Name) -ForegroundColor Yellow
+
+        if ($reasonGroup.Name -match 'IncludeSecurityGroups')  { $sawGroups = $true }
+        if ($reasonGroup.Name -match '-Scope Staff|-Scope Guests') { $sawUsers = $true }
+    }
+
+    $rerun = [System.Collections.Generic.List[string]]::new()
+
+    if ($sawUsers)  { [void]$rerun.Add('-Scope Both') }
+    if ($sawGroups) { [void]$rerun.Add('-IncludeSecurityGroups') }
+
+    if ($rerun.Count -gt 0) {
+        Write-Host ''
+        Write-Host "  To catch them, run the same command again with: $($rerun -join ' ')" -ForegroundColor Yellow
+    }
+
+    if ($sawGroups) {
+        Write-Host '  On a site connected to a Team, the entry named after the site IS the Team.' -ForegroundColor DarkGray
+        Write-Host '  Leaving it behind leaves the whole team editing, however many individuals were moved.' -ForegroundColor DarkGray
+    }
 }
 
 Write-Host ''

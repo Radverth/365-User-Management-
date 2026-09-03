@@ -1132,14 +1132,22 @@ function Invoke-MembersToViewers {
 
     Write-Explain @(
         'On a site connected to a Team, the Members list contains the Team itself',
-        '(shown as "<Site> Members") as well as any individuals.',
+        '- shown as "<Site> Members" - as well as any individuals.',
         '',
-        'Moving that entry makes the whole Team read-only on this site in one go,',
+        'That single entry is usually where most of the edit access comes from.',
+        'Answer no and it stays exactly as it is: everyone in the Team carries on',
+        'editing the site however many individuals were moved, which normally',
+        'reads as the run having done nothing.',
+        '',
+        'Answer yes and the whole Team becomes read-only on this site in one go,',
         'including people who join later. It does not affect Teams chat, the',
-        'shared mailbox or the calendar.'
+        'shared mailbox or the calendar - Microsoft 365 group membership is never',
+        'touched.',
+        '',
+        'The same answer covers any other security group in the Members list.'
     )
 
-    if (Read-YesNo -Prompt '   Move the Team entry as well?' -Default $false) {
+    if (Read-YesNo -Prompt '   Move the Team entry and any security groups as well' -Default $true) {
         $parameters['IncludeSecurityGroups'] = $true
     }
 

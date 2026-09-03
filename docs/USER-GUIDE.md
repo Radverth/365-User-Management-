@@ -270,9 +270,13 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 - **Move the Team entry?** On a Teams-connected site this is the important one — see below.
 - **Anyone to leave alone?** Give the email addresses of service or break-glass accounts that must keep editing.
 
-> **Teams sites work differently.** On a site connected to a Team, the Members list contains the Team itself — shown as *"&lt;Site&gt; Members"* — alongside any individuals. Moving that single entry makes the whole team read-only on that site in one step, including people who join later.
+> **Teams sites work differently, and this is the usual reason a run looks like it did nothing.** On a site connected to a Team, the Members list contains the Team itself — shown as *"&lt;Site&gt; Members"* — alongside any individuals. That one entry is normally where most of the edit access comes from.
+>
+> Answer **no** to *Move the Team entry and any security groups as well* and it stays exactly as it is: everyone in the Team carries on editing, however many individuals were moved. Answer **yes** — now the default — and the whole team becomes read-only on that site in one step, including people who join later.
 >
 > It does **not** affect Teams chat, the group mailbox or the calendar. Microsoft 365 group membership is never modified, deliberately — removing someone there would strip all three.
+
+> **Anyone left with edit access is named at the end of the run,** grouped by the reason, with the exact command to re-run. If people are still in Members afterwards, that is where it says why — there are only two possible causes, and both name the answer you need to change.
 
 ---
 
