@@ -2,39 +2,43 @@
 
 <#
 .SYNOPSIS
-    Rewrites mailbox email addresses from a spreadsheet, for the two moves a
-    cross-tenant migration needs: releasing a vanity address in the old tenant,
-    and adding it as an alias in the new one.
+    Rewrites email addresses on mailboxes and mail-enabled groups from a
+    spreadsheet, for the two moves a cross-tenant migration needs: releasing a
+    vanity address in the old tenant, and adding it as an alias in the new one.
 
 .DESCRIPTION
     Two jobs, one spreadsheet, chosen with -Action.
 
     SetPrimaryToOnMicrosoft  (run against the OLD tenant)
-        Finds each mailbox by its PrimarySMTPAddress and makes the .onmicrosoft
+        Finds each recipient by its PrimarySMTPAddress and makes the .onmicrosoft
         address in the Email Address column the primary instead. The old primary
         is kept as an alias unless -RemoveOldPrimary is given, which is what
         actually frees the domain for verification in the new tenant.
 
     AddAliasToNewPrimary     (run against the NEW tenant)
-        Finds each mailbox by the address in the Hawsons Primary column and adds
+        Finds each recipient by the address in the Hawsons Primary column and adds
         the PrimarySMTPAddress to it as an alias. The primary address is left
         exactly as it is, so nobody's reply-to or sending address changes.
 
-    Both are additive where they can be and safe to re-run: a mailbox that is
+    Distribution groups, mail-enabled security groups, Microsoft 365 groups and
+    dynamic distribution groups are handled alongside mailboxes, each through the
+    cmdlets Exchange provides for it. Use -Scope to do only one or the other.
+
+    Both are additive where they can be and safe to re-run: anything that is
     already in the wanted state is reported and skipped, not written to. Nothing
     outside the SMTP addresses is touched - SIP, X500 and EUM entries are carried
     across untouched, so free/busy and old Outlook replies keep working.
 
-    Every mailbox is checked before it is written to. Directory-synced mailboxes,
+    Everything is checked before it is written to. Directory-synced objects,
     addresses on a domain the tenant has not accepted, and addresses already used
     by somebody else are reported with the reason rather than attempted.
 
 .PARAMETER InputPath
-    Spreadsheet of mailboxes, saved as CSV. Column names are matched loosely, so
+    Spreadsheet of mailboxes and groups, saved as CSV. Column names are matched loosely, so
     'PrimarySMTPAddress', 'Primary SMTP Address' and 'primary smtp address' are
     all understood. These are the columns it looks for:
 
-        User Principal Name   optional; used to find the mailbox if the address
+        User Principal Name   optional; used to find the recipient if the address
                               lookup fails, and shown in the log
         Hawsons Primary       the address that is to stay primary in the new
                               tenant. Required by AddAliasToNewPrimary
@@ -45,6 +49,18 @@
 
 .PARAMETER Action
     SetPrimaryToOnMicrosoft or AddAliasToNewPrimary. See the description.
+
+.PARAMETER Scope
+    Which kinds of recipient to act on:
+
+        Both        mailboxes and mail-enabled groups. The default
+        Mailboxes   mailboxes only; groups in the file are reported and skipped
+        Groups      distribution groups, mail-enabled security groups, Microsoft
+                    365 groups and dynamic distribution groups only
+
+    Groups hold addresses on your vanity domain just as mailboxes do, so a domain
+    cannot be released until theirs have moved too. Both is the default for that
+    reason.
 
 .PARAMETER RemoveOldPrimary
     SetPrimaryToOnMicrosoft only. Also remove the old primary address from the
@@ -64,18 +80,20 @@
     notice.
 
 .PARAMETER DisableEmailAddressPolicy
-    Turn off the email address policy on a mailbox that has one, so its addresses
-    can be set. Exchange refuses to change addresses on a policy-managed mailbox,
-    and this is the supported way round it. Without this, such mailboxes are
+    Turn off the email address policy on a recipient that has one, so its
+    addresses can be set. Exchange refuses to change addresses on a policy-managed
+    recipient, and this is the supported way round it. Without this, they are
     reported and skipped.
+
+    Microsoft 365 groups have no such policy, so this never applies to them.
 
 .PARAMETER LogPath
     CSV recording the outcome for every row. Defaults to a name that includes the
     action, so the two runs do not overwrite each other.
 
 .PARAMETER MaxMailboxes
-    Stop after this many rows. For a pilot run over a handful of mailboxes before
-    committing to the whole file.
+    Stop after this many rows. For a pilot run over a handful of recipients before
+    committing to the whole file. Also accepted as -MaxMailboxes.
 
 .PARAMETER AdminUpn
     Sign in as this account. Prompts if omitted.
@@ -95,13 +113,13 @@
 .EXAMPLE
     .\Set-MailboxAddresses.ps1 -InputPath .\mailboxes.csv -Action SetPrimaryToOnMicrosoft -WhatIf
 
-    Rehearsal against the old tenant. Reports what each mailbox's addresses would
-    become, and every reason a mailbox could not be done, without writing.
+    Rehearsal against the old tenant. Reports what each recipient's addresses
+    would become, and every reason one could not be done, without writing.
 
 .EXAMPLE
-    .\Set-MailboxAddresses.ps1 -InputPath .\mailboxes.csv -Action SetPrimaryToOnMicrosoft -MaxMailboxes 5
+    .\Set-MailboxAddresses.ps1 -InputPath .\mailboxes.csv -Action SetPrimaryToOnMicrosoft -MaxRecipients 5
 
-    Pilot: switch the first five mailboxes to their .onmicrosoft address, keeping
+    Pilot: switch the first five recipients to their .onmicrosoft address, keeping
     the old address on each as an alias.
 
 .EXAMPLE
@@ -113,8 +131,13 @@
 .EXAMPLE
     .\Set-MailboxAddresses.ps1 -InputPath .\mailboxes.csv -Action AddAliasToNewPrimary
 
-    Against the new tenant: add each old address as an alias to the mailbox that
-    already holds the Hawsons primary. No primary address changes.
+    Against the new tenant: add each old address as an alias to the mailbox or
+    group that already holds the Hawsons primary. No primary address changes.
+
+.EXAMPLE
+    .\Set-MailboxAddresses.ps1 -InputPath .\groups.csv -Action SetPrimaryToOnMicrosoft -Scope Groups
+
+    Groups only, leaving every mailbox in the file alone.
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -126,6 +149,9 @@ param(
     [ValidateSet('SetPrimaryToOnMicrosoft', 'AddAliasToNewPrimary')]
     [string]$Action,
 
+    [ValidateSet('Both', 'Mailboxes', 'Groups')]
+    [string]$Scope = 'Both',
+
     [switch]$RemoveOldPrimary,
 
     [switch]$AllowAnyNewPrimary,
@@ -134,7 +160,8 @@ param(
 
     [string]$LogPath,
 
-    [int]$MaxMailboxes = 0,
+    [Alias('MaxMailboxes')]
+    [int]$MaxRecipients = 0,
 
     [string]$AdminUpn,
 
@@ -254,6 +281,136 @@ function Split-ProxyAddress {
     }
 }
 
+# Exchange has a different cmdlet pair for every kind of recipient and no common
+# one that can change addresses, so the differences live here rather than spread
+# through the run.
+$script:RecipientKinds = [ordered]@{
+    Mailbox = @{
+        Label      = 'mailbox'
+        IsGroup    = $false
+        Get        = 'Get-Mailbox'
+        Set        = 'Set-Mailbox'
+        HasPolicy  = $true
+        PrimaryVia = 'AddressList'
+    }
+    DistributionGroup = @{
+        Label      = 'distribution group'
+        IsGroup    = $true
+        Get        = 'Get-DistributionGroup'
+        Set        = 'Set-DistributionGroup'
+        HasPolicy  = $true
+        PrimaryVia = 'AddressList'
+    }
+    Microsoft365Group = @{
+        Label      = 'Microsoft 365 group'
+        IsGroup    = $true
+        Get        = 'Get-UnifiedGroup'
+        Set        = 'Set-UnifiedGroup'
+        HasPolicy  = $false
+        # A Microsoft 365 group also carries an SPO: proxy address tying it to its
+        # SharePoint site. Rewriting the whole list to move the primary would put
+        # that back too, which Exchange need not accept, so the primary is moved
+        # with the parameter meant for it and the old address removed separately.
+        PrimaryVia = 'PrimarySmtpAddress'
+    }
+    DynamicDistributionGroup = @{
+        Label      = 'dynamic distribution group'
+        IsGroup    = $true
+        Get        = 'Get-DynamicDistributionGroup'
+        Set        = 'Set-DynamicDistributionGroup'
+        HasPolicy  = $true
+        PrimaryVia = 'AddressList'
+    }
+}
+
+function Get-RecipientKind {
+    <#  Maps what Get-Recipient says a thing is onto which cmdlets can change it.
+        Order matters: a Microsoft 365 group reports as GroupMailbox and would
+        otherwise be taken for an ordinary mailbox. #>
+    param([string]$RecipientTypeDetails)
+
+    switch -Regex ($RecipientTypeDetails) {
+        '^GroupMailbox$'             { return 'Microsoft365Group' }
+        '^DynamicDistributionGroup$' { return 'DynamicDistributionGroup' }
+        '^RoomList$'                 { return 'DistributionGroup' }
+        'Mailbox$'                   { return 'Mailbox' }
+        'Group$'                     { return 'DistributionGroup' }
+    }
+
+    return $null
+}
+
+function Resolve-TargetRecipient {
+    <#  One Get-Recipient says what an address belongs to; the cmdlet for that kind
+        then reads the properties needed to change its addresses. Asking in that
+        order is what lets a group be recognised as a group rather than reported as
+        a missing mailbox. #>
+    param(
+        # A blank cell in the spreadsheet arrives as $null, and a mandatory
+        # [string[]] refuses that outright, so empties are accepted and skipped.
+        [Parameter(Mandatory)][AllowEmptyString()][AllowEmptyCollection()]
+        [string[]]$Candidates
+    )
+
+    $tried = @()
+
+    foreach ($candidate in $Candidates) {
+
+        if (-not $candidate -or $candidate -in $tried) { continue }
+
+        $tried += $candidate
+
+        try   { $recipient = Get-Recipient -Identity $candidate -ErrorAction Stop }
+        catch { continue }
+
+        $typeDetails = [string]$recipient.RecipientTypeDetails
+        $kind        = Get-RecipientKind -RecipientTypeDetails $typeDetails
+
+        if (-not $kind) {
+            return [pscustomobject]@{
+                Object = $null; Kind = $null; TypeDetails = $typeDetails
+                Reason = "$candidate is a $typeDetails. This script changes mailboxes and mail-enabled groups; that is neither."
+            }
+        }
+
+        $definition = $script:RecipientKinds[$kind]
+
+        try {
+            $object = & $definition.Get -Identity $candidate -ErrorAction Stop
+        }
+        catch {
+            return [pscustomobject]@{
+                Object = $null; Kind = $kind; TypeDetails = $typeDetails
+                Reason = "$candidate is a $typeDetails but $($definition.Get) could not read it: $($_.Exception.Message)"
+            }
+        }
+
+        return [pscustomobject]@{ Object = $object; Kind = $kind; TypeDetails = $typeDetails; Reason = $null }
+    }
+
+    return [pscustomobject]@{
+        Object = $null; Kind = $null; TypeDetails = $null
+        Reason = "Nothing found for $($tried -join ' or ')"
+    }
+}
+
+function Set-RecipientAddresses {
+    <#  The one place that writes. Which cmdlet runs depends on the kind, and the
+        policy flag is only passed to kinds that have one. #>
+    param(
+        [Parameter(Mandatory)]$Definition,
+        [Parameter(Mandatory)][string]$Identity,
+        [Parameter(Mandatory)]$EmailAddresses,
+        [bool]$TurnOffPolicy
+    )
+
+    $params = @{ Identity = $Identity; EmailAddresses = $EmailAddresses; ErrorAction = 'Stop' }
+
+    if ($TurnOffPolicy -and $Definition.HasPolicy) { $params['EmailAddressPolicyEnabled'] = $false }
+
+    & $Definition.Set @params
+}
+
 #endregion Helpers ------------------------------------------------------------
 
 # Shared CSV input handling - see Common/InputCsv.ps1
@@ -274,7 +431,7 @@ Write-Host "Reading $InputPath ..." -ForegroundColor Cyan
 # No required columns are declared here: the headers are matched loosely a moment
 # later, and a strict match on names typed by hand would reject good files.
 $rows = Import-InputCsv -Path $InputPath -Delimiter $Delimiter `
-                        -Expected 'the mailbox spreadsheet (user principal name, Hawsons primary, PrimarySMTPAddress, email address)'
+                        -Expected 'the mailbox and group spreadsheet (user principal name, Hawsons primary, PrimarySMTPAddress, email address)'
 
 if ($rows.Count -eq 0) { throw "No rows found in $InputPath." }
 
@@ -373,7 +530,8 @@ $log = [System.Collections.Generic.List[PSCustomObject]]::new()
 function Write-Result {
     param(
         [string]$UserPrincipalName,
-        [string]$Mailbox,
+        [string]$Recipient,
+        [string]$RecipientType,
         [string]$Address,
         [Parameter(Mandatory)][string]$Status,
         [string]$PrimaryBefore,
@@ -385,7 +543,8 @@ function Write-Result {
         Timestamp         = (Get-Date).ToString('s')
         Action            = $Action
         UserPrincipalName = $UserPrincipalName
-        Mailbox           = $Mailbox
+        Recipient         = $Recipient
+        RecipientType     = $RecipientType
         Address           = $Address
         Status            = $Status
         PrimaryBefore     = $PrimaryBefore
@@ -396,10 +555,10 @@ function Write-Result {
 
 #region Process ---------------------------------------------------------------
 
-$toProcess = if ($MaxMailboxes -gt 0) { @($rows | Select-Object -First $MaxMailboxes) } else { $rows }
+$toProcess = if ($MaxRecipients -gt 0) { @($rows | Select-Object -First $MaxRecipients) } else { $rows }
 
-if ($MaxMailboxes -gt 0 -and $rows.Count -gt $MaxMailboxes) {
-    Write-Host "Pilot run: $MaxMailboxes of $($rows.Count) row(s)." -ForegroundColor Yellow
+if ($MaxRecipients -gt 0 -and $rows.Count -gt $MaxRecipients) {
+    Write-Host "Pilot run: $MaxRecipients of $($rows.Count) row(s)." -ForegroundColor Yellow
     Write-Host ''
 }
 
@@ -412,7 +571,7 @@ foreach ($row in $toProcess) {
 
     $rowNumber++
 
-    Write-Progress -Activity "Updating mailbox addresses ($Action)" `
+    Write-Progress -Activity "Updating email addresses ($Action)" `
                    -Status "$rowNumber of $($toProcess.Count)" `
                    -PercentComplete (($rowNumber / [double]$toProcess.Count) * 100)
 
@@ -421,7 +580,7 @@ foreach ($row in $toProcess) {
     $oldPrimary  = Get-RowValue -Row $row -Column $columns['OldPrimary']
     $onMicrosoft = Get-RowValue -Row $row -Column $columns['OnMicrosoft']
 
-    # What this row is looking the mailbox up by, and what address it is about.
+    # What this row is looking the recipient up by, and what address it is about.
     if ($Action -eq 'SetPrimaryToOnMicrosoft') {
         $lookup       = $oldPrimary
         $lookupLabel  = 'PrimarySMTPAddress'
@@ -452,65 +611,53 @@ foreach ($row in $toProcess) {
         continue
     }
 
-    #region Find the mailbox --------------------------------------------------
+    #region Find the mailbox or group -----------------------------------------
 
-    $mailbox   = $null
-    $identity  = $null
-    $triedWith = @()
+    $resolved = Resolve-TargetRecipient -Candidates @(@($lookup, $upn) | Where-Object { $_ })
 
-    foreach ($candidate in @($lookup, $upn)) {
-
-        if (-not $candidate -or $candidate -in $triedWith) { continue }
-
-        $triedWith += $candidate
-
-        try {
-            $mailbox = Get-Mailbox -Identity $candidate -ErrorAction Stop
-            $identity = $candidate
-            break
-        }
-        catch { $mailbox = $null }
-    }
-
-    if (-not $mailbox) {
-
-        # Saying what the address IS beats saying it is not a mailbox. A shared
-        # mailbox is fine; a mail user or a group is not, and needs a different fix.
-        $whatIsIt = $null
-
-        foreach ($candidate in $triedWith) {
-            try {
-                $recipient = Get-Recipient -Identity $candidate -ErrorAction Stop
-                $whatIsIt  = "$candidate exists but is a $($recipient.RecipientTypeDetails), not a mailbox"
-                break
-            }
-            catch { }
-        }
-
-        $detail = if ($whatIsIt) { $whatIsIt } else { "No mailbox found for $($triedWith -join ' or ')" }
-
-        Write-Result -UserPrincipalName $upn -Address $lookup -Status 'NotFound' -Detail $detail
+    if (-not $resolved.Object) {
+        # Saying what the address IS beats saying it was not found. A mail contact
+        # and a missing address need completely different things doing about them.
+        Write-Result -UserPrincipalName $upn -Address $lookup -RecipientType $resolved.TypeDetails `
+                     -Status 'NotFound' -Detail $resolved.Reason
         continue
     }
 
-    $mailboxName    = $mailbox.PrimarySmtpAddress.ToString()
-    $currentPrimary = $mailboxName
-    $writeIdentity  = $mailbox.Guid.ToString()
+    $target        = $resolved.Object
+    $definition    = $script:RecipientKinds[$resolved.Kind]
+    $kindLabel     = $definition.Label
+    $targetName    = $target.PrimarySmtpAddress.ToString()
+    $currentPrimary = $targetName
+    $writeIdentity  = $target.Guid.ToString()
 
-    #endregion Find the mailbox -----------------------------------------------
+    if ($Scope -eq 'Mailboxes' -and $definition.IsGroup) {
+        Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject `
+                     -Status 'SkippedByScope' -PrimaryBefore $currentPrimary `
+                     -Detail "This is a $kindLabel and -Scope is Mailboxes"
+        continue
+    }
+
+    if ($Scope -eq 'Groups' -and -not $definition.IsGroup) {
+        Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject `
+                     -Status 'SkippedByScope' -PrimaryBefore $currentPrimary `
+                     -Detail "This is a $kindLabel and -Scope is Groups"
+        continue
+    }
+
+    #endregion Find the mailbox or group ---------------------------------------
 
     #region Checks that apply to both actions ---------------------------------
 
     $domain = Get-AddressDomain -Address $subject
 
     if (-not $acceptedDomains.ContainsKey($domain)) {
-        Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'DomainNotAccepted' `
+        Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'DomainNotAccepted' `
                      -PrimaryBefore $currentPrimary `
                      -Detail "'$domain' is not an accepted domain in this tenant, so the address cannot be added. Add and verify the domain first."
         continue
     }
 
-    $proxies = @($mailbox.EmailAddresses | ForEach-Object { Split-ProxyAddress -Proxy ([string]$_) })
+    $proxies = @($target.EmailAddresses | ForEach-Object { Split-ProxyAddress -Proxy ([string]$_) })
     $existing = @($proxies | Where-Object { $_.IsSmtp } | ForEach-Object { $_.Address })
 
     #endregion Checks that apply to both actions ------------------------------
@@ -524,7 +671,7 @@ foreach ($row in $toProcess) {
             $stillThere = @($existing | Where-Object { $_ -ieq $oldPrimary }).Count -gt 0
 
             $detail = if ($RemoveOldPrimary -and $stillThere) {
-                "Already primary, but $oldPrimary is still on the mailbox as an alias"
+                "Already primary, but $oldPrimary is still on the $kindLabel as an alias"
             }
             else {
                 'Already the primary address'
@@ -533,36 +680,36 @@ foreach ($row in $toProcess) {
             # The one case where "already done" still needs a write: the primary is
             # right but -RemoveOldPrimary was added on a later run.
             if (-not ($RemoveOldPrimary -and $stillThere)) {
-                Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'AlreadyPrimary' `
+                Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'AlreadyPrimary' `
                              -PrimaryBefore $currentPrimary -PrimaryAfter $currentPrimary -Detail $detail
                 continue
             }
         }
         elseif ($oldPrimary -and $currentPrimary -ine $oldPrimary) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Mismatch' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Mismatch' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail "The mailbox found has primary $currentPrimary, but the spreadsheet says $oldPrimary. Left alone - check the row."
+                         -Detail "The $kindLabel found has primary $currentPrimary, but the spreadsheet says $oldPrimary. Left alone - check the row."
             continue
         }
 
         if (-not $AllowAnyNewPrimary -and $domain -notlike '*.onmicrosoft.com') {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Refused' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Refused' `
                          -PrimaryBefore $currentPrimary `
                          -Detail "$subject is not an .onmicrosoft.com address. If that is deliberate, re-run with -AllowAnyNewPrimary."
             continue
         }
 
-        if ($mailbox.EmailAddressPolicyEnabled -and -not $DisableEmailAddressPolicy) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'PolicyManaged' `
+        if ($definition.HasPolicy -and $target.EmailAddressPolicyEnabled -and -not $DisableEmailAddressPolicy) {
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'PolicyManaged' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail 'An email address policy manages this mailbox, so Exchange will not let its addresses be set. Re-run with -DisableEmailAddressPolicy.'
+                         -Detail "An email address policy manages this $kindLabel, so Exchange will not let its addresses be set. Re-run with -DisableEmailAddressPolicy."
             continue
         }
 
-        if ($mailbox.IsDirSynced) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'DirSynced' `
+        if ($target.IsDirSynced) {
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'DirSynced' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail 'This mailbox is synchronised from on-premises Active Directory. Change its proxyAddresses there instead.'
+                         -Detail "This $kindLabel is synchronised from on-premises Active Directory. Change its proxyAddresses there instead."
             continue
         }
 
@@ -600,49 +747,57 @@ foreach ($row in $toProcess) {
             "Set primary to $subject, keeping $currentPrimary as an alias"
         }
 
-        if ($PSCmdlet.ShouldProcess("mailbox $mailboxName", $description)) {
+        if ($PSCmdlet.ShouldProcess("$kindLabel $targetName", $description)) {
 
             try {
-                $setParams = @{
-                    Identity       = $writeIdentity
-                    EmailAddresses = $newAddresses.ToArray()
-                    ErrorAction    = 'Stop'
-                }
+                if ($definition.PrimaryVia -eq 'PrimarySmtpAddress') {
 
-                if ($DisableEmailAddressPolicy -and $mailbox.EmailAddressPolicyEnabled) {
-                    $setParams['EmailAddressPolicyEnabled'] = $false
-                }
+                    # Two smaller writes rather than one big one. Nothing is lost:
+                    # moving the primary leaves the old address behind as an alias,
+                    # which is exactly the default behaviour, and the removal is a
+                    # separate step anyway.
+                    if ($currentPrimary -ine $subject) {
+                        & $definition.Set -Identity $writeIdentity -PrimarySmtpAddress $subject -ErrorAction Stop
+                    }
 
-                Set-Mailbox @setParams
+                    if ($removing) {
+                        & $definition.Set -Identity $writeIdentity -EmailAddresses @{ Remove = "smtp:$oldPrimary" } -ErrorAction Stop
+                    }
+                }
+                else {
+                    Set-RecipientAddresses -Definition $definition -Identity $writeIdentity `
+                                           -EmailAddresses $newAddresses.ToArray() `
+                                           -TurnOffPolicy ([bool]($DisableEmailAddressPolicy -and $target.EmailAddressPolicyEnabled))
+                }
 
                 # Read it back. Exchange accepts an address list and then applies its
                 # own rules to it, so what was asked for is not always what landed.
-                $after       = Get-Mailbox -Identity $writeIdentity -ErrorAction Stop
+                $after        = & $definition.Get -Identity $writeIdentity -ErrorAction Stop
                 $afterPrimary = $after.PrimarySmtpAddress.ToString()
 
                 if ($afterPrimary -ieq $subject) {
                     $detail = if ($removing) { "$oldPrimary removed" } else { "$currentPrimary kept as an alias" }
 
-                    Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'PrimaryChanged' `
+                    Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'PrimaryChanged' `
                                  -PrimaryBefore $currentPrimary -PrimaryAfter $afterPrimary -Detail $detail
                 }
                 else {
-                    Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Failed' `
+                    Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Failed' `
                                  -PrimaryBefore $currentPrimary -PrimaryAfter $afterPrimary `
                                  -Detail "Exchange accepted the change but the primary is $afterPrimary, not $subject."
 
-                    Write-Warning "$mailboxName : primary is $afterPrimary, not $subject."
+                    Write-Warning "$targetName : primary is $afterPrimary, not $subject."
                 }
             }
             catch {
-                Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Failed' `
+                Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Failed' `
                              -PrimaryBefore $currentPrimary -Detail $_.Exception.Message
 
-                Write-Warning "$mailboxName : $($_.Exception.Message)"
+                Write-Warning "$targetName : $($_.Exception.Message)"
             }
         }
         else {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'WhatIf' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'WhatIf' `
                          -PrimaryBefore $currentPrimary -PrimaryAfter $subject -Detail "Would $($description.Substring(0,1).ToLowerInvariant())$($description.Substring(1))"
         }
 
@@ -653,23 +808,23 @@ foreach ($row in $toProcess) {
         #region Add the old address as an alias -------------------------------
 
         if ($currentPrimary -ieq $subject) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'AlreadyPrimary' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'AlreadyPrimary' `
                          -PrimaryBefore $currentPrimary -PrimaryAfter $currentPrimary `
-                         -Detail "$subject is already the PRIMARY address on this mailbox, not an alias. Left alone - adding it would change nothing, and demoting it is not this script's job."
+                         -Detail "$subject is already the PRIMARY address on this $kindLabel, not an alias. Left alone - adding it would change nothing, and demoting it is not this script's job."
             continue
         }
 
         if (@($existing | Where-Object { $_ -ieq $subject }).Count -gt 0) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'AlreadyAlias' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'AlreadyAlias' `
                          -PrimaryBefore $currentPrimary -PrimaryAfter $currentPrimary `
-                         -Detail 'Already on the mailbox as an alias'
+                         -Detail "Already on the $kindLabel as an alias"
             continue
         }
 
         if ($newPrimary -and $currentPrimary -ine $newPrimary) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Mismatch' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Mismatch' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail "The mailbox found has primary $currentPrimary, but the spreadsheet says $newPrimary. Left alone - check the row."
+                         -Detail "The $kindLabel found has primary $currentPrimary, but the spreadsheet says $newPrimary. Left alone - check the row."
             continue
         }
 
@@ -680,50 +835,42 @@ foreach ($row in $toProcess) {
         try {
             $holder = Get-Recipient -Identity $subject -ErrorAction Stop
 
-            if ($holder -and $holder.Guid.ToString() -ne $mailbox.Guid.ToString()) {
+            if ($holder -and $holder.Guid.ToString() -ne $target.Guid.ToString()) {
                 $conflict = "$subject is already in use by $($holder.DisplayName) ($($holder.PrimarySmtpAddress)). Remove it there first."
             }
         }
         catch { }
 
         if ($conflict) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Conflict' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Conflict' `
                          -PrimaryBefore $currentPrimary -Detail $conflict
             continue
         }
 
-        if ($mailbox.EmailAddressPolicyEnabled -and -not $DisableEmailAddressPolicy) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'PolicyManaged' `
+        if ($definition.HasPolicy -and $target.EmailAddressPolicyEnabled -and -not $DisableEmailAddressPolicy) {
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'PolicyManaged' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail 'An email address policy manages this mailbox, so Exchange will not let its addresses be set. Re-run with -DisableEmailAddressPolicy.'
+                         -Detail "An email address policy manages this $kindLabel, so Exchange will not let its addresses be set. Re-run with -DisableEmailAddressPolicy."
             continue
         }
 
-        if ($mailbox.IsDirSynced) {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'DirSynced' `
+        if ($target.IsDirSynced) {
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'DirSynced' `
                          -PrimaryBefore $currentPrimary `
-                         -Detail 'This mailbox is synchronised from on-premises Active Directory. Add the alias to its proxyAddresses there instead.'
+                         -Detail "This $kindLabel is synchronised from on-premises Active Directory. Add the alias to its proxyAddresses there instead."
             continue
         }
 
-        if ($PSCmdlet.ShouldProcess("mailbox $mailboxName", "Add alias $subject, leaving $currentPrimary as the primary")) {
+        if ($PSCmdlet.ShouldProcess("$kindLabel $targetName", "Add alias $subject, leaving $currentPrimary as the primary")) {
 
             try {
-                $setParams = @{
-                    Identity       = $writeIdentity
-                    # Lowercase 'smtp:' is what makes it an alias. An uppercase
-                    # prefix here would silently take over as the primary.
-                    EmailAddresses = @{ Add = "smtp:$subject" }
-                    ErrorAction    = 'Stop'
-                }
+                # Lowercase 'smtp:' is what makes it an alias. An uppercase prefix
+                # here would silently take over as the primary.
+                Set-RecipientAddresses -Definition $definition -Identity $writeIdentity `
+                                       -EmailAddresses @{ Add = "smtp:$subject" } `
+                                       -TurnOffPolicy ([bool]($DisableEmailAddressPolicy -and $target.EmailAddressPolicyEnabled))
 
-                if ($DisableEmailAddressPolicy -and $mailbox.EmailAddressPolicyEnabled) {
-                    $setParams['EmailAddressPolicyEnabled'] = $false
-                }
-
-                Set-Mailbox @setParams
-
-                $after        = Get-Mailbox -Identity $writeIdentity -ErrorAction Stop
+                $after        = & $definition.Get -Identity $writeIdentity -ErrorAction Stop
                 $afterPrimary = $after.PrimarySmtpAddress.ToString()
                 $afterSmtp    = @($after.EmailAddresses |
                                     ForEach-Object { Split-ProxyAddress -Proxy ([string]$_) } |
@@ -731,34 +878,34 @@ foreach ($row in $toProcess) {
                                     ForEach-Object { $_.Address })
 
                 if ($afterPrimary -ine $currentPrimary) {
-                    Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Failed' `
+                    Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Failed' `
                                  -PrimaryBefore $currentPrimary -PrimaryAfter $afterPrimary `
                                  -Detail "The alias was added but the primary changed from $currentPrimary to $afterPrimary. Put it back before going any further."
 
-                    Write-Warning "$mailboxName : primary changed to $afterPrimary."
+                    Write-Warning "$targetName : primary changed to $afterPrimary."
                 }
                 elseif (@($afterSmtp | Where-Object { $_ -ieq $subject }).Count -eq 0) {
-                    Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Failed' `
+                    Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Failed' `
                                  -PrimaryBefore $currentPrimary -PrimaryAfter $afterPrimary `
-                                 -Detail 'Exchange accepted the change but the alias is not on the mailbox.'
+                                 -Detail "Exchange accepted the change but the alias is not on the $kindLabel."
 
-                    Write-Warning "$mailboxName : alias $subject is not present after the write."
+                    Write-Warning "$targetName : alias $subject is not present after the write."
                 }
                 else {
-                    Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'AliasAdded' `
+                    Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'AliasAdded' `
                                  -PrimaryBefore $currentPrimary -PrimaryAfter $afterPrimary `
                                  -Detail "Primary left as $afterPrimary"
                 }
             }
             catch {
-                Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'Failed' `
+                Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'Failed' `
                              -PrimaryBefore $currentPrimary -Detail $_.Exception.Message
 
-                Write-Warning "$mailboxName : $($_.Exception.Message)"
+                Write-Warning "$targetName : $($_.Exception.Message)"
             }
         }
         else {
-            Write-Result -UserPrincipalName $upn -Mailbox $mailboxName -Address $subject -Status 'WhatIf' `
+            Write-Result -UserPrincipalName $upn -Recipient $targetName -RecipientType $kindLabel -Address $subject -Status 'WhatIf' `
                          -PrimaryBefore $currentPrimary -PrimaryAfter $currentPrimary `
                          -Detail "Would add $subject as an alias, leaving $currentPrimary as the primary"
         }
@@ -767,7 +914,7 @@ foreach ($row in $toProcess) {
     }
 }
 
-Write-Progress -Activity "Updating mailbox addresses ($Action)" -Completed
+Write-Progress -Activity "Updating email addresses ($Action)" -Completed
 
 #endregion Process ------------------------------------------------------------
 
@@ -790,7 +937,7 @@ Write-Host "  Log : $((Resolve-Path -Path $LogPath).Path)" -ForegroundColor Gree
 $failures = @($log | Where-Object { $_.Status -eq 'Failed' })
 
 if ($failures.Count -gt 0) {
-    Write-Host "  $($failures.Count) mailbox(es) failed - see the Detail column." -ForegroundColor Red
+    Write-Host "  $($failures.Count) recipient(s) failed - see the Detail column." -ForegroundColor Red
 }
 
 $needsAttention = @($log | Where-Object { $_.Status -in @('NotFound', 'Mismatch', 'Conflict', 'DomainNotAccepted', 'PolicyManaged', 'DirSynced', 'Refused') })

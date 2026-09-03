@@ -12,7 +12,7 @@ Each has its own page in this folder, named after the script.
 | `Guests/Import-GuestPermissions.ps1` | Recreate those guests in another tenant | **Yes** |
 | `SharePoint/Get-SiteOwners.ps1` | SharePoint site owners → CSV | No |
 | `SharePoint/Set-SiteMembersToViewers.ps1` | Demote site members to read-only | **Yes** |
-| `Exchange/Set-MailboxAddresses.ps1` | Switch a mailbox's primary address, or add one as an alias | **Yes** |
+| `Exchange/Set-MailboxAddresses.ps1` | Switch a mailbox or group's primary address, or add one as an alias | **Yes** |
 | `Setup/New-AppOnlyCertificate.ps1` | Certificate for app-only sign-in | Local files only |
 | `Reports/Get-M365UserPermissionsReport.ps1` | All users and their groups → CSV | No |
 
