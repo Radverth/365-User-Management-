@@ -245,11 +245,20 @@ switch ($PSCmdlet.ParameterSetName) {
     }
 
     'All' {
-        Write-Host "Connecting to $TenantAdminUrl to enumerate sites..." -ForegroundColor Cyan
+        # Correct the address before connecting. Pointed at an ordinary site,
+        # Get-PnPTenantSite fails with a message about content types that says
+        # nothing about the real mistake.
+        $admin = Resolve-TenantAdminUrl -Url $TenantAdminUrl
 
-        Connect-ScriptSite -Url $TenantAdminUrl -Auth $auth
+        if ($admin.Corrected) {
+            Write-Host "  $($admin.Original) is not the admin address - using $($admin.Url)" -ForegroundColor Yellow
+        }
 
-        $tenantSites = @(Get-PnPTenantSite -ErrorAction Stop)
+        Write-Host "Connecting to $($admin.Url) to enumerate sites..." -ForegroundColor Cyan
+
+        Connect-ScriptSite -Url $admin.Url -Auth $auth
+
+        $tenantSites = @(Get-ScriptTenantSite -AdminUrl $admin.Url -Auth $auth)
 
         if (-not $IncludeOneDrive) {
             $tenantSites = @($tenantSites | Where-Object { $_.Template -notlike 'SPSPERS*' })

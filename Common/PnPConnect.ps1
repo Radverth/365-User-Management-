@@ -269,3 +269,111 @@ function Write-PnPLoginAdvice {
     Write-Warning 'This version of PnP.PowerShell has no -PersistLogin, so every site will ask you to sign in. Update the module to avoid that:'
     Write-Warning '    Update-Module PnP.PowerShell'
 }
+
+function Resolve-TenantAdminUrl {
+    <#  Turns whatever was typed into the tenant admin URL.
+
+        This matters more than it looks. Point Get-PnPTenantSite at an ordinary
+        site and SharePoint answers with a web page rather than data, which PnP
+        reports as 'Unexpected response from the server. The content type of the
+        response is "text/html"' - a message that says nothing about the actual
+        mistake. Correcting the URL up front is cheaper than explaining it after.
+
+        Returns the admin URL and whether it had to be corrected. #>
+    param([Parameter(Mandatory)][string]$Url)
+
+    $trimmed = $Url.Trim().TrimEnd('/')
+
+    if (-not $trimmed) { throw 'No tenant admin URL was given.' }
+
+    if ($trimmed -notmatch '^https://') { $trimmed = "https://$trimmed" }
+
+    try   { $uri = [System.Uri]$trimmed }
+    catch { throw "'$Url' is not a URL. It should look like https://contoso-admin.sharepoint.com" }
+
+    $host_ = $uri.Host.ToLowerInvariant()
+
+    # Already the admin endpoint - keep it, and drop any path.
+    if ($host_ -match '^[a-z0-9][a-z0-9-]*-admin\.sharepoint\.(com|us|de|cn)$') {
+        return [pscustomobject]@{ Url = "https://$host_"; Corrected = $false; Original = $Url }
+    }
+
+    # An ordinary site, or someone's OneDrive host. Both name the tenant, so the
+    # admin URL can be worked out rather than asked for again.
+    if ($host_ -match '^(?<tenant>[a-z0-9][a-z0-9-]*?)(?<my>-my)?\.sharepoint\.(?<tld>com|us|de|cn)$') {
+        $admin = "https://$($Matches['tenant'])-admin.sharepoint.$($Matches['tld'])"
+        return [pscustomobject]@{ Url = $admin; Corrected = $true; Original = $Url }
+    }
+
+    $message = [System.Text.StringBuilder]::new()
+
+    [void]$message.AppendLine("'$Url' does not look like a SharePoint address.")
+    [void]$message.AppendLine('')
+    [void]$message.AppendLine('  The tenant admin URL is your SharePoint address with -admin added:')
+    [void]$message.AppendLine('    https://contoso.sharepoint.com  ->  https://contoso-admin.sharepoint.com')
+
+    throw $message.ToString()
+}
+
+function Get-ScriptTenantSite {
+    <#  Get-PnPTenantSite, with the one failure everybody hits translated out of
+        PnP's wording and into what to do about it. #>
+    param(
+        [Parameter(Mandatory)][string]$AdminUrl,
+        $Auth
+    )
+
+    try {
+        return @(Get-PnPTenantSite -ErrorAction Stop)
+    }
+    catch {
+
+        $reason = $_.Exception.Message
+
+        # SharePoint answered with a web page. It does that when the address is
+        # not the admin endpoint, or when whoever is asking may not use it - in
+        # both cases you get a sign-in or error page instead of data, and PnP can
+        # only report the content type.
+        if ($reason -match 'text/html') {
+
+            $message = [System.Text.StringBuilder]::new()
+
+            [void]$message.AppendLine("The tenant admin site at $AdminUrl returned a web page instead of data, so the list of sites could not be read.")
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  That happens for one of three reasons, in the order worth checking:')
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  1. The address is not the admin site. It must be your SharePoint address')
+            [void]$message.AppendLine('     with -admin added, and nothing after it:')
+            [void]$message.AppendLine('       https://contoso-admin.sharepoint.com')
+            [void]$message.AppendLine('')
+
+            if ($Auth -and $Auth.AppOnly) {
+                [void]$message.AppendLine('  2. The app registration has not been granted, or not consented, the')
+                [void]$message.AppendLine('     SharePoint application permission Sites.FullControl.All. Without it the')
+                [void]$message.AppendLine('     admin site refuses app-only callers.')
+                [void]$message.AppendLine('')
+                [void]$message.AppendLine('  3. The certificate belongs to a different tenant than the one in the URL.')
+            }
+            else {
+                [void]$message.AppendLine('  2. The account you signed in with is not a SharePoint Administrator or')
+                [void]$message.AppendLine('     Global Administrator. Only those roles may open the admin site, whatever')
+                [void]$message.AppendLine('     access you have to individual sites.')
+                [void]$message.AppendLine('')
+                [void]$message.AppendLine('  3. You signed in to a different tenant than the one in the URL. Sign in')
+                [void]$message.AppendLine('     again, or add -NoPersistedLogin to ignore a cached sign-in.')
+            }
+
+            [void]$message.AppendLine('')
+            [void]$message.AppendLine('  You do not have to solve this to get a report: name the sites you want')
+            [void]$message.AppendLine('  instead, with -SiteUrl or -SitesCsvPath. Neither needs the admin site.')
+
+            throw $message.ToString()
+        }
+
+        if ($reason -match '\(401\)|Unauthorized|\(403\)|Access denied') {
+            throw "The tenant admin site at $AdminUrl refused the sign-in: $reason`n`n  Opening it needs the SharePoint Administrator or Global Administrator role, or - for app-only - the SharePoint application permission Sites.FullControl.All."
+        }
+
+        throw
+    }
+}

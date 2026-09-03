@@ -204,7 +204,9 @@ Independent of the guest migration — run these whenever you need them.
 
 ### Find out who owns what · [Read-only]
 
-Menu option **7**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`.
+Menu option **7**. Choose "every site in the tenant" and give it your admin URL — your SharePoint address with `-admin` inserted, so `contoso.sharepoint.com` becomes `contoso-admin.sharepoint.com`. Type the ordinary address by mistake and it is corrected for you, with a line saying so.
+
+> **"Every site in the tenant" needs the SharePoint Administrator or Global Administrator role.** Only those roles may open the admin site, however much access you have to individual sites. Without one, the admin site answers with a sign-in page instead of data and the run stops with an explanation. You do not have to solve that to get a report — choose one site, or a spreadsheet of sites, instead. Neither goes near the admin site.
 
 "Owner" means several different things in SharePoint, and the report lists all of them, so one person can appear more than once for the same site. That's intentional — see Reading the reports.
 
