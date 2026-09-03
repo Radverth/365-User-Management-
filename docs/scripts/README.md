@@ -4,7 +4,7 @@ Documentation for running each script directly, with parameters, rather than thr
 
 The menu is a convenience. Everything it does, these scripts do — it only asks questions and passes the answers along. Use these when you want to script a run, schedule one, or pass options the menu doesn't expose. `Set-MailboxAddresses.ps1` is the one script that is not on the menu at all, and has to be run directly.
 
-Each has its own page in this folder, named after the script.
+Each has its own page in this folder, named after the script. `Mailbox-Address-Commands.md`, one folder up, is a copy-paste command sheet for `Set-MailboxAddresses.ps1`.
 
 | Script | Purpose | Changes anything? |
 |---|---|---|

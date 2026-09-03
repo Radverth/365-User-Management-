@@ -27,6 +27,8 @@ Mail users and mail contacts are **not** changed. They are reported as `NotFound
 Use `-Scope` to narrow it: `Both` (default), `Mailboxes`, or `Groups`. Anything the scope excludes is logged `SkippedByScope` rather than silently passed over.
 
 > This one is not on the `Start-MigrationToolkit.ps1` menu — run it directly.
+>
+> For just the commands in the order you run them, see **Mailbox-Address-Commands.md** in the `docs` folder. This page is the full reference.
 
 ---
 
