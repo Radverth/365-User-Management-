@@ -11,6 +11,7 @@ Each has its own page in this folder, named after the script. `Mailbox-Address-C
 | `Guests/Export-GuestPermissions.ps1` | Guests and their group memberships → CSV | No |
 | `Guests/Import-GuestPermissions.ps1` | Recreate those guests in another tenant | **Yes** |
 | `SharePoint/Get-SiteOwners.ps1` | SharePoint site owners → CSV | No |
+| `SharePoint/Get-SiteMembers.ps1` | Everyone with access to a site, and how they got it → CSV | No |
 | `SharePoint/Set-SiteMembersToViewers.ps1` | Demote site members to read-only | **Yes** |
 | `Exchange/Set-MailboxAddresses.ps1` | Switch a mailbox or group's primary address, or add one as an alias | **Yes** |
 | `Setup/New-AppOnlyCertificate.ps1` | Certificate for app-only sign-in | Local files only |
@@ -22,13 +23,14 @@ Each has its own page in this folder, named after the script. `Mailbox-Address-C
 
 ### Keep the folder together
 
-Five of the seven scripts load shared code from the `Common` folder next to them:
+Six of the eight scripts load shared code from the `Common` folder next to them:
 
 | Script | Loads |
 |---|---|
 | `Export-GuestPermissions.ps1` | `Common/InputCsv.ps1` |
 | `Import-GuestPermissions.ps1` | `Common/InputCsv.ps1` |
 | `Get-SiteOwners.ps1` | `Common/InputCsv.ps1`, `Common/PnPConnect.ps1` |
+| `Get-SiteMembers.ps1` | `Common/InputCsv.ps1`, `Common/PnPConnect.ps1` |
 | `Set-SiteMembersToViewers.ps1` | `Common/InputCsv.ps1`, `Common/PnPConnect.ps1` |
 | `Set-MailboxAddresses.ps1` | `Common/InputCsv.ps1` |
 | `New-AppOnlyCertificate.ps1` | nothing — fully standalone |

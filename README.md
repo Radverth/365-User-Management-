@@ -38,6 +38,7 @@ run directly.
 | `Guests/Import-GuestPermissions.ps1` | B (target) | Yes |
 | `SharePoint/Set-SiteMembersToViewers.ps1` | Either | Yes |
 | `SharePoint/Get-SiteOwners.ps1` | Either | No |
+| `SharePoint/Get-SiteMembers.ps1` | Either | No |
 | `Exchange/Set-MailboxAddresses.ps1` | Either | Yes |
 | `Reports/Get-M365UserPermissionsReport.ps1` | Either | No |
 | `Setup/New-AppOnlyCertificate.ps1` | — | Local files only |

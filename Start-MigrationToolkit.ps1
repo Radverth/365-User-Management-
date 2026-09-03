@@ -974,6 +974,47 @@ function Invoke-NotifyGuests {
     )
 }
 
+function Invoke-SiteMembers {
+
+    Write-Banner 'Report who can get into your SharePoint sites'
+
+    Write-Explain @(
+        'Produces a spreadsheet of everyone with access. Nothing is changed.',
+        '',
+        'Access reaches a site by several routes - the Members group, the Visitors',
+        'group, any other group on the site, permissions given to somebody',
+        'directly, and the connected Microsoft 365 group. All of them are listed,',
+        'so a person who has access two ways appears twice. That is what you have',
+        'to unpick to take their access away.',
+        '',
+        'Owners are reported by the other option, not this one.'
+    )
+
+    $parameters = Get-SiteSelection -AllowAllSites
+    $parameters += Get-SharePointAuth
+
+    Write-Step 'Who should be listed?'
+
+    Write-Explain @(
+        'Before a migration the useful question is usually which outside people',
+        'can reach which sites. Answer yes to list only those.'
+    )
+
+    if (Read-YesNo -Prompt '   Guests only') { $parameters['GuestsOnly'] = $true }
+
+    if (Read-YesNo -Prompt '   Include site owners as well') { $parameters['IncludeOwnersGroup'] = $true }
+
+    Write-Step 'Where should the spreadsheet go?'
+
+    $parameters['OutputPath'] = Get-OutputPath -Prompt 'File to create' -Default './SharePoint_SiteMembers.csv'
+
+    Write-Step 'Running the report'
+
+    Show-Command -ScriptPath (Join-Path $script:Root 'SharePoint/Get-SiteMembers.ps1') -Parameters $parameters
+
+    [void](Invoke-ToolkitScript -ScriptPath (Join-Path $script:Root 'SharePoint/Get-SiteMembers.ps1') -Parameters $parameters)
+}
+
 function Invoke-SiteOwners {
 
     Write-Banner 'Report who owns your SharePoint sites'
@@ -1295,6 +1336,8 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         @{ Header = 'SharePoint permissions'; Note = 'Independent of the guest migration.' }
         @{ Key = 'owners';  Label = 'Report who owns your sites'; Tag = 'read-only'
            Detail = 'Writes a spreadsheet. Good to run before changing anything.' }
+        @{ Key = 'members'; Label = 'Report who can get into your sites'; Tag = 'read-only'
+           Detail = 'Members, visitors, other groups, direct permissions. Guests only, if you like.' }
         @{ Key = 'viewers'; Label = 'Change site members to view-only'; Tag = 'changes tenant'
            Detail = 'Groups and direct permissions. One site, a list, or the whole tenant.' }
 
@@ -1311,6 +1354,7 @@ for ($loop = 0; $loop -lt 100; $loop++) {
         'import'  { Invoke-ImportGuests }
         'notify'  { Invoke-NotifyGuests }
         'owners'  { Invoke-SiteOwners }
+        'members' { Invoke-SiteMembers }
         'viewers' { Invoke-MembersToViewers }
         'register' { Invoke-RegisterApp }
         'cert'    { Invoke-CreateCertificate }

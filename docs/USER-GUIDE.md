@@ -210,9 +210,33 @@ Menu option **7**. Choose "every site in the tenant" and give it your admin URL 
 
 > **Watch for orphaned sites.** A row marked `OrphanedGroup` means the site is connected to a Microsoft 365 group that no longer exists. Those sites have no owners at all and no group to inherit them from. Assign someone before migrating anything.
 
+### Find out who can get in · [Read-only]
+
+Menu option **8**. The companion to the owners report: that one answers *who runs this site*, this one answers *who can get into it*.
+
+Access reaches a site by more routes than most people expect, and all of them are listed, each row tagged with which route it came from:
+
+| Route | What it means |
+|---|---|
+| `MembersGroup` | The site's Members group |
+| `VisitorsGroup` | The Visitors group — read-only, but still access |
+| `SharePointGroup` | Any other group on the site. Real sites accumulate these and they get forgotten |
+| `DirectPermission` | Someone given permission on the site itself rather than through a group |
+| `Microsoft365GroupMember` | Members of the connected Microsoft 365 group, on a Teams site. These people have access even when the Members group looks empty |
+
+Somebody who has access two ways appears twice. That is deliberate — it is exactly what you have to unpick to take their access away.
+
+The `Roles` column shows the permission level behind each row, read from the site's own settings, so a custom group with Full Control does not read as ordinary membership.
+
+> **Before a migration, answer yes to "Guests only".** It reduces the report to external people and how each of them got in — usually the only version anyone reads.
+
+Owners are left to the previous option, since that one also covers site collection administrators. Answer yes to *Include site owners as well* if you want one file covering everybody.
+
+> **"Everyone except external users" is a finding, not noise.** It and the other tenant-wide claims are filtered out by default so they don't bury the real names. Worth running once with them included: a site carrying that claim is open far wider than its group membership suggests.
+
 ### Make members read-only · [Changes your tenant]
 
-Menu option **8**. Demotes people from edit to read-only on a site, in both places access comes from:
+Menu option **9**. Demotes people from edit to read-only on a site, in both places access comes from:
 
 - **the site's Members group** — they move to Visitors
 - **permissions given to them directly on the site** — reduced to read-only
@@ -247,7 +271,7 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 
 ### List all users and their group access · [Read-only]
 
-Menu option **9**. A spreadsheet of every user in the tenant — staff and guests alike — with the groups each one belongs to.
+Menu option **10**. A spreadsheet of every user in the tenant — staff and guests alike — with the groups each one belongs to.
 
 This one shows **effective** access: a group someone reaches only through another group is included. That makes it right for a permissions review, and different on purpose from the guest export at step 1 of Part 2, which records direct memberships only.
 
