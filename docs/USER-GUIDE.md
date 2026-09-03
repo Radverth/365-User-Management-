@@ -238,12 +238,17 @@ Owners are left to the previous option, since that one also covers site collecti
 
 ### Make members read-only · [Changes your tenant]
 
-Menu option **9**. Demotes people from edit to read-only on a site, in both places access comes from:
+Menu option **9**. Demotes people from edit to read-only on a site, in the places access comes from:
 
 - **the site's Members group** — they move to Visitors
 - **permissions given to them directly on the site** — reduced to read-only
+- **every other group on the site** — if you ask for it
 
-Both matter. Moving someone out of Members changes nothing if they were also given Edit directly, which is easily done and easily forgotten. The wizard offers to leave direct permissions alone if you really want group membership only.
+Both of the first two matter. Moving someone out of Members changes nothing if they were also given Edit directly, which is easily done and easily forgotten. The wizard offers to leave direct permissions alone if you really want group membership only.
+
+> **Some sites have two member groups.** A plain **Members** sitting beside the site's own **&lt;Site&gt; Members**, usually left behind by whoever set the site up. Emptying only the site's own group leaves the other one untouched and those people carry on editing.
+>
+> Answer yes to *Empty the site's other groups as well* and every other group on the site is emptied into Visitors too. **Owners and Visitors are never touched**, whatever they have been renamed to. It is off by default because a custom group can carry Full Control — read the preview, which names the group each person came from.
 
 People are added to Visitors *before* being removed from Members, so nobody is ever left with no access.
 

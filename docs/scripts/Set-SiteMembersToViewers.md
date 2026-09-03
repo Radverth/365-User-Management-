@@ -1,6 +1,6 @@
 # Set-SiteMembersToViewers.ps1
 
-Demotes people from Edit to Read on a SharePoint site, in both places access comes from: membership of the site's **Members** group, and any permission granted to them **directly** on the site.
+Demotes people from Edit to Read on a SharePoint site, in both places access comes from: membership of the site's **Members** group, and any permission granted to them **directly** on the site. With `-IncludeOtherGroups`, every other SharePoint group on the site as well.
 
 Both matter — moving someone out of Members changes nothing if they also hold Edit directly.
 
@@ -37,6 +37,7 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `-TenantAdminUrl` | string | — | Required with `-AllSites`, e.g. `https://contoso-admin.sharepoint.com` |
 | `-IncludeOneDrive` | switch | off | With `-AllSites`, also include personal OneDrive sites |
 | `-Scope` | `Guests` / `Staff` / `Both` | `Guests` | Who to demote. Applies to group membership and direct permissions alike |
+| `-IncludeOtherGroups` | switch | off | Also empty every other SharePoint group on the site into Visitors — see below |
 | `-SkipDirectPermissions` | switch | off | Only fix group membership, leaving direct site permissions untouched |
 | `-IncludeInternalUsers` | switch | off | Superseded by `-Scope Both` and equivalent to it. Still accepted so existing commands work |
 | `-IncludeSecurityGroups` | switch | off | Also demote group principals inside Members — see below |
@@ -93,7 +94,9 @@ SharePoint/Set-SiteMembersToViewers.ps1
 
 ## Log columns
 
-`Timestamp`, `SiteUrl`, `PrincipalName`, `LoginName`, `Email`, `PrincipalType`, `IsGuest`, `Status`, `Detail`
+`Timestamp`, `SiteUrl`, `PrincipalName`, `LoginName`, `Email`, `PrincipalType`, `IsGuest`, `SourceGroup`, `Status`, `Detail`
+
+`SourceGroup` names the group the person was taken out of. With `-IncludeOtherGroups` that is the column to read.
 
 | Status | Meaning |
 |---|---|
@@ -106,6 +109,7 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `Excluded` | Matched `-ExcludeLogin` |
 | `Skipped` | Internal user, or a group principal, and the matching switch was not set |
 | `Info` | Group-connected site notice |
+| `GroupSkipped` | A group was empty, so there was nothing to move |
 | `SiteSkipped` / `SiteFailed` | The whole site could not be processed |
 | `Failed` | The move failed — read `Detail` |
 | `WhatIf` | Rehearsal only |
@@ -114,7 +118,19 @@ SharePoint/Set-SiteMembersToViewers.ps1
 
 ## Behaviour worth knowing
 
-**Order is deliberate.** Each principal is added to Visitors *before* being removed from Members. If the add fails, the removal is skipped and logged — nobody is left with no access to the site.
+**Order is deliberate.** Each principal is added to Visitors *before* being removed from their group. If the add fails, the removal is skipped and logged — nobody is left with no access to the site.
+
+**`-IncludeOtherGroups` catches the second members group.** Sites that have been through a few hands often carry more than one member-type group — a plain **Members** beside the site's own **&lt;Site&gt; Members** — usually left behind by whoever set the site up. Demoting only the associated group leaves that other one exactly as it was, and the people in it carry on editing.
+
+With the switch, every SharePoint group on the site is emptied into Visitors, not just the associated one. Three rules keep it safe:
+
+- **The Owners group is never touched**, whatever it has been renamed to. It is found by association, not by name.
+- **The Visitors group is never a source** — it is where everyone is going.
+- **An empty group is logged `GroupSkipped`** rather than passed over silently.
+
+It is off by default because a custom group can carry Full Control, and emptying one of those is a bigger change than demoting the Members group. Rehearse with `-WhatIf` and read the `SourceGroup` column before committing.
+
+Everything else applies unchanged: `-Scope` still decides who is in scope, `-ExcludeLogin` still protects individuals, and people are still added to Visitors before being removed.
 
 **Guests only, by default.** `-Scope Staff` does the opposite, leaving guests alone; `-Scope Both` covers everyone. A guest is identified by login name matching `-GuestLoginPattern`, which covers both B2B guests (`#ext#`) and SharePoint-only external users (`urn:spo:guest`). The same test decides scope for group membership and for direct permissions, so the two cannot disagree.
 

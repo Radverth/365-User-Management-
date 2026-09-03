@@ -1093,6 +1093,26 @@ function Invoke-MembersToViewers {
            Detail = 'Everyone with edit access to the site.' }
     )
 
+    Write-Step 'Other groups on the site'
+
+    Write-Explain @(
+        'Some sites carry more than one member-type group - a plain "Members"',
+        'alongside the site''s own "<Site> Members", left behind by whoever set it',
+        'up. Emptying only the site''s own group leaves that other one exactly as',
+        'it was, and the people in it keep editing.',
+        '',
+        'Answering yes empties every other group on the site into Visitors too.',
+        'The Owners group and the Visitors group are never touched, whatever they',
+        'have been renamed to.',
+        '',
+        'Worth knowing before you say yes: a custom group can carry Full Control,',
+        'so read the preview - it names the group each person came from.'
+    )
+
+    if (Read-YesNo -Prompt '   Empty the site''s other groups as well' -Default $false) {
+        $parameters['IncludeOtherGroups'] = $true
+    }
+
     Write-Step 'Direct permissions'
 
     Write-Explain @(

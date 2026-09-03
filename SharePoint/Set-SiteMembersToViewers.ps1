@@ -65,6 +65,23 @@
 
     Applies to SharePoint group membership and to direct permissions alike.
 
+.PARAMETER IncludeOtherGroups
+    Also empty every other SharePoint group on the site into Visitors, not just
+    the associated Members group.
+
+    Sites that have been through a few hands often carry a second member-like
+    group - a plain "Members" beside the site's own "<Site> Members" - and
+    demoting only the associated one leaves that access exactly as it was. This
+    catches those, along with any custom group that has been given Edit.
+
+    The Owners group and the Visitors group are never touched, whatever they are
+    called. Groups that already have nothing above read-only are reported and
+    left alone.
+
+    Off by default, because a custom group can carry Full Control and emptying it
+    is a bigger change than demoting the Members group. Run the preview first and
+    read the SourceGroup column.
+
 .PARAMETER SkipDirectPermissions
     Only fix group membership, leaving permissions granted directly on the site
     untouched. By default both are handled, because someone with direct Edit keeps
@@ -163,6 +180,8 @@ param(
 
     # Superseded by -Scope Both. Still honoured so existing commands keep working.
     [switch]$IncludeInternalUsers,
+
+    [switch]$IncludeOtherGroups,
 
     [switch]$SkipDirectPermissions,
 
@@ -375,6 +394,7 @@ function Write-Result {
         [string]$Email,
         [string]$PrincipalType = '',
         [string]$IsGuest = '',
+        [string]$SourceGroup = '',
         [Parameter(Mandatory)][string]$Status,
         [string]$Detail = ''
     )
@@ -387,6 +407,7 @@ function Write-Result {
         Email         = $Email
         PrincipalType = $PrincipalType
         IsGuest       = $IsGuest
+        SourceGroup   = $SourceGroup
         Status        = $Status
         Detail        = $Detail
     })
@@ -457,24 +478,55 @@ foreach ($site in $sites) {
         Write-Verbose "  Could not determine group connection for $site : $($_.Exception.Message)"
     }
 
-    # --- enumerate and filter -----------------------------------------------
+    # --- which groups are being emptied into Visitors ------------------------
 
-    try {
-        $members = @(Get-PnPGroupMember -Identity $membersGroup -ErrorAction Stop)
-    }
-    catch {
-        Write-Warning "  Could not read members: $($_.Exception.Message)"
-        Write-Result -Site $site -Status 'SiteFailed' -Detail "Member enumeration failed: $($_.Exception.Message)"
-        continue
+    $sourceGroups = [System.Collections.Generic.List[object]]::new()
+    $sourceGroups.Add([pscustomobject]@{ Group = $membersGroup; Label = [string]$membersGroup.Title })
+
+    if ($IncludeOtherGroups) {
+
+        # A site that has been through a few hands often carries a second
+        # member-like group - a plain "Members" beside the site's own
+        # "<Site> Members" - and demoting only the associated one leaves that
+        # access exactly as it was.
+        $protectedTitles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+        [void]$protectedTitles.Add([string]$membersGroup.Title)
+        [void]$protectedTitles.Add([string]$visitorsGroup.Title)
+
+        # Owners are never in scope. Found by association rather than by name,
+        # because the group is often renamed.
+        try {
+            $ownersGroup = Get-PnPGroup -AssociatedOwnerGroup -ErrorAction Stop
+
+            if ($ownersGroup) { [void]$protectedTitles.Add([string]$ownersGroup.Title) }
+        }
+        catch {
+            Write-Verbose "  No associated Owners group on $site : $($_.Exception.Message)"
+        }
+
+        try {
+            foreach ($group in @(Get-PnPGroup -ErrorAction Stop)) {
+
+                $groupTitle = [string]$group.Title
+
+                if ($protectedTitles.Contains($groupTitle)) { continue }
+
+                $sourceGroups.Add([pscustomobject]@{ Group = $group; Label = $groupTitle })
+            }
+        }
+        catch {
+            Write-Warning "  Could not list the site's other groups: $($_.Exception.Message)"
+            Write-Result -Site $site -Status 'Failed' `
+                         -Detail "The site's other SharePoint groups could not be listed, so only the Members group was processed: $($_.Exception.Message)"
+        }
+
+        if ($sourceGroups.Count -gt 1) {
+            Write-Host "  $($sourceGroups.Count) group(s) to empty: $(($sourceGroups | ForEach-Object { $_.Label }) -join ', ')" -ForegroundColor DarkGray
+        }
     }
 
-    if ($members.Count -eq 0) {
-        Write-Host '  Members group is empty.' -ForegroundColor DarkGray
-        Write-Result -Site $site -Status 'SiteSkipped' -Detail 'Members group is empty'
-        continue
-    }
-
-    # Read Visitors once so we can tell who is already there.
+    # Read Visitors once for the whole site - every group demotes into it.
     try {
         $existingVisitors = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
@@ -491,96 +543,120 @@ foreach ($site in $sites) {
     $moved = 0
     $skipped = 0
 
-    foreach ($principal in $members) {
+    foreach ($source in $sourceGroups) {
 
-        $login = [string]$principal.LoginName
-        $title = [string]$principal.Title
-        $email = [string]$principal.Email
-        $type  = [string]$principal.PrincipalType
-        $guest = Test-IsGuest -Principal $principal -Pattern $GuestLoginPattern
+        $sourceGroup = $source.Group
+        $sourceLabel = $source.Label
 
-        # Explicit protection list wins over everything else.
-        if ($ExcludeLogin -and ($ExcludeLogin -contains $login -or ($email -and $ExcludeLogin -contains $email))) {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'Excluded' -Detail 'Matched -ExcludeLogin'
-            $skipped++
+        # --- enumerate and filter -----------------------------------------------
+
+        try {
+            $members = @(Get-PnPGroupMember -Identity $sourceGroup -ErrorAction Stop)
+        }
+        catch {
+            Write-Warning "  Could not read $sourceLabel : $($_.Exception.Message)"
+            Write-Result -Site $site -SourceGroup $sourceLabel -Status 'Failed' `
+                         -Detail "Member enumeration failed: $($_.Exception.Message)"
             continue
         }
 
-        # Nested groups are principals too; demoting one moves everyone inside it.
-        # On a Microsoft 365 group-connected site the Members group holds the
-        # group's member claim, so this is the principal that governs the whole
-        # team's access to the site.
-        $decision = Get-ScopeDecision -PrincipalType $type -IsGuest $guest -Scope $Scope `
-                                      -AllowGroups $IncludeSecurityGroups
-
-        if (-not $decision.InScope) {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'Skipped' -Detail $decision.Reason
-            $skipped++
+        if ($members.Count -eq 0) {
+            Write-Host "  $sourceLabel is empty." -ForegroundColor DarkGray
+            Write-Result -Site $site -SourceGroup $sourceLabel -Status 'GroupSkipped' -Detail 'Group is empty'
             continue
         }
 
-        # --- add to Visitors first ------------------------------------------
+        foreach ($principal in $members) {
 
-        $inVisitors = $existingVisitors.Contains($login)
+            $login = [string]$principal.LoginName
+            $title = [string]$principal.Title
+            $email = [string]$principal.Email
+            $type  = [string]$principal.PrincipalType
+            $guest = Test-IsGuest -Principal $principal -Pattern $GuestLoginPattern
 
-        if ($inVisitors) {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'AlreadyVisitor' -Detail 'Already in the Visitors group'
-        }
-        elseif ($PSCmdlet.ShouldProcess("$title on $site", 'Add to Visitors')) {
-
-            try {
-                Add-PnPGroupMember -Identity $visitorsGroup -LoginName $login -ErrorAction Stop
-
-                [void]$existingVisitors.Add($login)
-
+            # Explicit protection list wins over everything else.
+            if ($ExcludeLogin -and ($ExcludeLogin -contains $login -or ($email -and $ExcludeLogin -contains $email))) {
                 Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                             -IsGuest $guest -Status 'AddedToVisitors'
-            }
-            catch {
-                # Do not remove from Members if the promotion to Visitors failed -
-                # that would leave the user with no access to the site.
-                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                             -IsGuest $guest -Status 'Failed' `
-                             -Detail "Add to Visitors failed, left in Members: $($_.Exception.Message)"
-
-                Write-Warning "  $title : $($_.Exception.Message)"
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'Excluded' -Detail 'Matched -ExcludeLogin'
+                $skipped++
                 continue
             }
-        }
-        else {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'WhatIf' -Detail 'Would add to Visitors and remove from Members'
-            continue
-        }
 
-        # --- then remove from Members ---------------------------------------
+            # Nested groups are principals too; demoting one moves everyone inside it.
+            # On a Microsoft 365 group-connected site the Members group holds the
+            # group's member claim, so this is the principal that governs the whole
+            # team's access to the site.
+            $decision = Get-ScopeDecision -PrincipalType $type -IsGuest $guest -Scope $Scope `
+                                          -AllowGroups $IncludeSecurityGroups
 
-        if (-not $RemoveFromMembers) {
-            Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                         -IsGuest $guest -Status 'KeptInMembers' -Detail '-RemoveFromMembers:$false was specified'
-            $moved++
-            continue
-        }
-
-        if ($PSCmdlet.ShouldProcess("$title on $site", 'Remove from Members')) {
-
-            try {
-                Remove-PnPGroupMember -Identity $membersGroup -LoginName $login -ErrorAction Stop
-
+            if (-not $decision.InScope) {
                 Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                             -IsGuest $guest -Status 'RemovedFromMembers'
-
-                $moved++
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'Skipped' -Detail $decision.Reason
+                $skipped++
+                continue
             }
-            catch {
-                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
-                             -IsGuest $guest -Status 'Failed' `
-                             -Detail "Now in Visitors but removal from Members failed: $($_.Exception.Message)"
 
-                Write-Warning "  $title : $($_.Exception.Message)"
+            # --- add to Visitors first ------------------------------------------
+
+            $inVisitors = $existingVisitors.Contains($login)
+
+            if ($inVisitors) {
+                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'AlreadyVisitor' -Detail 'Already in the Visitors group'
+            }
+            elseif ($PSCmdlet.ShouldProcess("$title on $site", "Add to Visitors (from $sourceLabel)")) {
+
+                try {
+                    Add-PnPGroupMember -Identity $visitorsGroup -LoginName $login -ErrorAction Stop
+
+                    [void]$existingVisitors.Add($login)
+
+                    Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                                 -IsGuest $guest -SourceGroup $sourceLabel -Status 'AddedToVisitors'
+                }
+                catch {
+                    # Do not remove them from the source group if the promotion to
+                    # Visitors failed - that would leave them with no access at all.
+                    Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                                 -IsGuest $guest -SourceGroup $sourceLabel -Status 'Failed' `
+                                 -Detail "Add to Visitors failed, left in $sourceLabel : $($_.Exception.Message)"
+
+                    Write-Warning "  $title : $($_.Exception.Message)"
+                    continue
+                }
+            }
+            else {
+                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'WhatIf' -Detail "Would add to Visitors and remove from $sourceLabel"
+                continue
+            }
+
+            # --- then remove from the group they came from ----------------------
+
+            if (-not $RemoveFromMembers) {
+                Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                             -IsGuest $guest -SourceGroup $sourceLabel -Status 'KeptInMembers' -Detail '-RemoveFromMembers:$false was specified'
+                $moved++
+                continue
+            }
+
+            if ($PSCmdlet.ShouldProcess("$title on $site", "Remove from $sourceLabel")) {
+
+                try {
+                    Remove-PnPGroupMember -Identity $sourceGroup -LoginName $login -ErrorAction Stop
+
+                    Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                                 -IsGuest $guest -SourceGroup $sourceLabel -Status 'RemovedFromMembers'
+
+                    $moved++
+                }
+                catch {
+                    Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
+                                 -IsGuest $guest -SourceGroup $sourceLabel -Status 'Failed' `
+                                 -Detail "Now in Visitors but removal from $sourceLabel failed: $($_.Exception.Message)"
+
+                    Write-Warning "  $title : $($_.Exception.Message)"
+                }
             }
         }
     }
