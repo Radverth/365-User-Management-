@@ -276,6 +276,10 @@ Other columns are ignored, so a site list exported from elsewhere usually works 
 >
 > It does **not** affect Teams chat, the group mailbox or the calendar. Microsoft 365 group membership is never modified, deliberately — removing someone there would strip all three.
 
+> **On a private Team, most people have no entry on the site at all** — their access comes only from being in the Team. Moving the Team entry makes them read-only, but *through the Team*, so none of them appear in the site's Visitors list.
+>
+> Answer yes to *Also add each member of the Team to Visitors by name* and every member of the Team is added to Visitors individually, so their read access stands on its own. **Nothing is removed and nobody leaves the Team** — they are only added. Worth doing if the Team's access to the site is going to change or go away and those people still need to read it.
+
 > **Anyone left with edit access is named at the end of the run,** grouped by the reason, with the exact command to re-run. If people are still in Members afterwards, that is where it says why — there are only two possible causes, and both name the answer you need to change.
 
 ---

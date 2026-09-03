@@ -65,6 +65,23 @@
 
     Applies to SharePoint group membership and to direct permissions alike.
 
+.PARAMETER AddGroupMembersAsVisitors
+    On a site connected to a Microsoft 365 group or a Team, add each member of
+    that group to the site's Visitors group by name.
+
+    Use this when the people you want as visitors are not listed on the site at
+    all - their access comes from being in the group. Moving the group's claim to
+    Visitors already makes them read-only, but it does so through the group, so
+    nobody appears in the site's Visitors list. This puts them there individually,
+    which is what you want if the group's access is going to change or go away.
+
+    Nothing is removed. Microsoft 365 group membership is never modified, and
+    nobody is taken out of the group - they are only added to Visitors. Anyone
+    already there is left alone.
+
+    -Scope still applies, so the default of Guests adds only the group's guests.
+    -ExcludeLogin still protects individuals.
+
 .PARAMETER IncludeOtherGroups
     Also empty every other SharePoint group on the site into Visitors, not just
     the associated Members group.
@@ -180,6 +197,8 @@ param(
 
     # Superseded by -Scope Both. Still honoured so existing commands keep working.
     [switch]$IncludeInternalUsers,
+
+    [switch]$AddGroupMembersAsVisitors,
 
     [switch]$IncludeOtherGroups,
 
@@ -483,11 +502,15 @@ foreach ($site in $sites) {
 
     # --- flag group-connected sites -----------------------------------------
 
+    $groupId = $null
+
     try {
         $pnpSite = Get-PnPSite -Includes GroupId -ErrorAction Stop
         $groupId = $pnpSite.GroupId
 
-        if ($groupId -and $groupId -ne [Guid]::Empty) {
+        if ($groupId -eq [Guid]::Empty) { $groupId = $null }
+
+        if ($groupId) {
             Write-Host '  Microsoft 365 group-connected site. Group membership is NOT modified.' -ForegroundColor Yellow
             Write-Result -Site $site -Status 'Info' `
                          -Detail "Group-connected site (group $groupId). Members of the Microsoft 365 group keep Edit rights and were not touched."
@@ -684,6 +707,113 @@ foreach ($site in $sites) {
                 Write-Result -Site $site -Title $title -Login $login -Email $email -PrincipalType $type `
                              -IsGuest $guest -SourceGroup $sourceLabel -Status 'WhatIf' `
                              -Detail "Would remove from $sourceLabel; already in Visitors"
+            }
+        }
+    }
+
+    # --- Microsoft 365 group members, by name --------------------------------
+
+    # The people this catches are not on the site at all: their access comes from
+    # being in the group. Moving the group's claim to Visitors already makes them
+    # read-only, but through the group - so nobody appears in the Visitors list,
+    # and the moment the group's access changes theirs goes with it. Naming them
+    # individually is what survives that.
+    if ($AddGroupMembersAsVisitors) {
+
+        if (-not $groupId) {
+            Write-Host '  Not connected to a Microsoft 365 group - no group members to add.' -ForegroundColor DarkGray
+            Write-Result -Site $site -SourceGroup 'Microsoft 365 group' -Status 'GroupSkipped' `
+                         -Detail 'Site is not connected to a Microsoft 365 group'
+        }
+        else {
+
+            $groupMembers = @()
+
+            try {
+                $groupMembers = @(Get-PnPMicrosoft365GroupMember -Identity $groupId -ErrorAction Stop)
+            }
+            catch {
+                Write-Warning "  Could not read the Microsoft 365 group's members: $($_.Exception.Message)"
+                Write-Result -Site $site -SourceGroup 'Microsoft 365 group' -Status 'Failed' `
+                             -Detail "Group members could not be read (the app may be missing Graph GroupMember.Read.All): $($_.Exception.Message)"
+            }
+
+            Write-Host "  $($groupMembers.Count) member(s) in the connected Microsoft 365 group." -ForegroundColor DarkGray
+
+            foreach ($member in $groupMembers) {
+
+                $gLogin = [string]$member.UserPrincipalName
+                $gTitle = [string]$member.DisplayName
+                $gEmail = [string]$member.Mail
+
+                if (-not $gEmail)  { $gEmail  = [string]$member.Email }
+                if (-not $gLogin)  { $gLogin  = $gEmail }
+                if (-not $gTitle)  { $gTitle  = $gLogin }
+
+                if (-not $gLogin) {
+                    # The PnP cmdlet sometimes returns only the directory object id.
+                    # An id cannot be added to a SharePoint group, so say so plainly
+                    # rather than failing per person with an opaque message.
+                    Write-Result -Site $site -SourceGroup 'Microsoft 365 group' -Status 'Failed' `
+                                 -Detail "A group member came back with no name or address (object $($member.Id)) - grant the app Graph User.Read.All so members can be resolved."
+                    $skipped++
+                    continue
+                }
+
+                $gGuest = [bool]($gLogin -imatch $GuestLoginPattern)
+
+                if ($ExcludeLogin -and ($ExcludeLogin -contains $gLogin -or ($gEmail -and $ExcludeLogin -contains $gEmail))) {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'Excluded' -Detail 'Matched -ExcludeLogin'
+                    $skipped++
+                    continue
+                }
+
+                $gDecision = Get-ScopeDecision -PrincipalType 'User' -IsGuest $gGuest -Scope $Scope `
+                                               -AllowGroups $IncludeSecurityGroups -IsGroupClaim $false
+
+                if (-not $gDecision.InScope) {
+                    # NotAdded rather than Skipped: this pass adds people, so the
+                    # "still has edit access" tally must not claim them.
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'NotAdded' -Detail $gDecision.Reason
+                    $skipped++
+                    continue
+                }
+
+                if ($existingVisitors.Contains($gLogin)) {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'AlreadyVisitor' `
+                                 -Detail 'Already in the Visitors group'
+                    continue
+                }
+
+                if ($PSCmdlet.ShouldProcess("$gTitle on $site", 'Add to Visitors by name')) {
+
+                    try {
+                        Add-PnPGroupMember -Identity $visitorsGroup -LoginName $gLogin -ErrorAction Stop
+
+                        [void]$existingVisitors.Add($gLogin)
+
+                        Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                     -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'AddedToVisitors' `
+                                     -Detail 'Added by name from the connected Microsoft 365 group; group membership unchanged'
+
+                        $moved++
+                    }
+                    catch {
+                        Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                     -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'Failed' `
+                                     -Detail "Add to Visitors failed: $($_.Exception.Message)"
+
+                        Write-Warning "  $gTitle : $($_.Exception.Message)"
+                    }
+                }
+                else {
+                    Write-Result -Site $site -Title $gTitle -Login $gLogin -Email $gEmail -PrincipalType 'User' `
+                                 -IsGuest $gGuest -SourceGroup 'Microsoft 365 group' -Status 'WhatIf' `
+                                 -Detail 'Would add to Visitors by name; nobody is removed from the group'
+                }
             }
         }
     }

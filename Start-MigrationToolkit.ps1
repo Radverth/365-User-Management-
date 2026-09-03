@@ -1151,6 +1151,20 @@ function Invoke-MembersToViewers {
         $parameters['IncludeSecurityGroups'] = $true
     }
 
+    Write-Explain @(
+        'Moving that entry makes everyone in the Team read-only, but it does so',
+        'through the Team - so none of them appear in the site''s Visitors list.',
+        '',
+        'Answer yes below to also add each member of the Team to Visitors by name.',
+        'Nothing is removed and nobody leaves the Team; they are only added. Do',
+        'this if the Team''s access to the site is going to change or go away, and',
+        'these people still need to be able to read it.'
+    )
+
+    if (Read-YesNo -Prompt '   Also add each member of the Team to Visitors by name' -Default $false) {
+        $parameters['AddGroupMembersAsVisitors'] = $true
+    }
+
     Write-Step 'Anyone to leave alone?'
 
     Write-Explain @('For example an administrator or service account that must keep editing.')

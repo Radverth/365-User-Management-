@@ -38,6 +38,7 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `-IncludeOneDrive` | switch | off | With `-AllSites`, also include personal OneDrive sites |
 | `-Scope` | `Guests` / `Staff` / `Both` | `Guests` | Who to demote. Applies to group membership and direct permissions alike |
 | `-IncludeOtherGroups` | switch | off | Also empty every other SharePoint group on the site into Visitors — see below |
+| `-AddGroupMembersAsVisitors` | switch | off | On a group-connected site, add each Microsoft 365 group member to Visitors by name — see below |
 | `-SkipDirectPermissions` | switch | off | Only fix group membership, leaving direct site permissions untouched |
 | `-IncludeInternalUsers` | switch | off | Superseded by `-Scope Both` and equivalent to it. Still accepted so existing commands work |
 | `-IncludeSecurityGroups` | switch | off | Also demote group principals inside Members — see below |
@@ -109,7 +110,8 @@ SharePoint/Set-SiteMembersToViewers.ps1
 | `Excluded` | Matched `-ExcludeLogin` |
 | `Skipped` | Internal user, or a group principal, and the matching switch was not set |
 | `Info` | Group-connected site notice |
-| `GroupSkipped` | A group was empty, so there was nothing to move |
+| `GroupSkipped` | A group was empty, or the site is not group-connected, so there was nothing to do |
+| `NotAdded` | A Microsoft 365 group member was out of `-Scope`, so was not added to Visitors. Not an edit-access finding |
 | `SiteSkipped` / `SiteFailed` | The whole site could not be processed |
 | `Failed` | The move failed — read `Detail` |
 | `WhatIf` | Rehearsal only |
@@ -143,6 +145,16 @@ Everything else applies unchanged: `-Scope` still decides who is in scope, `-Exc
 Permission levels already meaning read-only (`Read`, `View Only`, `Restricted View`, `Restricted Read`) are left as they are and logged as `AlreadyReadOnly`. Custom levels are treated as edit-capable, so a custom read-only level would be replaced with `Read` — check the rehearsal if you use one.
 
 **If people are still in Members afterwards, the run told you why.** Every principal left behind is logged `Skipped` with the switch that would have caught it, and the run ends by grouping those reasons and printing the exact command to re-run. There are only two reasons: the principal is out of `-Scope` (the default is `Guests`, so your own staff are left alone), or it is a group rather than a person and `-IncludeSecurityGroups` was not set.
+
+**`-AddGroupMembersAsVisitors` names the people the site has never heard of.** On a Teams or Microsoft 365 group-connected site, most people have no entry on the site at all — their access comes from being in the group. Moving the group's claim to Visitors makes them read-only, but *through the group*: nobody appears in the site's Visitors list, and the moment the group's access to the site changes, so does theirs.
+
+With this switch, each member of the connected group is added to Visitors **by name**, so their read access stands on its own.
+
+- **Nothing is removed.** Microsoft 365 group membership is never modified and nobody is taken out of the group. Anyone already in Visitors is left alone.
+- **`-Scope` still applies** — the default of `Guests` adds only the group's guests — and `-ExcludeLogin` still protects individuals.
+- **A member the directory would not resolve** is logged `Failed` naming the Graph permission needed, rather than failing with an opaque error.
+
+It pairs with `-IncludeSecurityGroups`, which handles the group's own claim; use both to make the Team read-only *and* have its people listed individually.
 
 **On a Teams site, `-IncludeSecurityGroups` is the one that matters.** The Members group of a group-connected site holds the connected group's *member claim*, shown in the admin centre as **"&lt;Site&gt; Members"**. Moving that single principal to Visitors makes the whole team read-only on the site at once, including people who join the group later.
 
