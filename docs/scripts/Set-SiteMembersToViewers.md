@@ -154,7 +154,7 @@ With this switch, each member of the connected group is added to Visitors **by n
 - **`-Scope` still applies** — the default of `Guests` adds only the group's guests — and `-ExcludeLogin` still protects individuals.
 - **A member the directory would not resolve** is logged `Failed` naming the Graph permission needed, rather than failing with an opaque error.
 
-It pairs with `-IncludeSecurityGroups`, which handles the group's own claim; use both to make the Team read-only *and* have its people listed individually.
+**On its own it reduces nobody's access.** SharePoint grants each person the *highest* permission they hold from any source, so read added by name counts for nothing while the group's own entry still holds Edit in the Members group. Use it with `-IncludeSecurityGroups`, which moves that entry to Visitors — the script warns if you run it without.
 
 **On a Teams site, `-IncludeSecurityGroups` is the one that matters.** The Members group of a group-connected site holds the connected group's *member claim*, shown in the admin centre as **"&lt;Site&gt; Members"**. Moving that single principal to Visitors makes the whole team read-only on the site at once, including people who join the group later.
 

@@ -414,6 +414,22 @@ else {
     Write-Host 'Covering both group membership and permissions granted directly on the site.' -ForegroundColor DarkGray
 }
 
+if ($AddGroupMembersAsVisitors) {
+
+    Write-Host 'Members of the connected Microsoft 365 group will be added to Visitors by name.' -ForegroundColor Cyan
+    Write-Host 'Nobody is removed from the group - group membership is never modified.' -ForegroundColor DarkGray
+
+    # SharePoint grants the union of everything a person holds, so read added by
+    # name is invisible next to edit still coming through the group. Saying this
+    # up front costs nothing; finding it out afterwards costs a run.
+    if (-not $IncludeSecurityGroups) {
+        Write-Warning 'Adding people by name does NOT reduce anyone''s access on its own.'
+        Write-Warning 'While the group''s own entry is left in Members, everyone in the group keeps Edit -'
+        Write-Warning 'SharePoint gives each person the highest permission they hold, from any source.'
+        Write-Warning 'Add -IncludeSecurityGroups to move that entry to Visitors as well.'
+    }
+}
+
 if (-not $RemoveFromMembers) {
     Write-Host 'Copy mode: users will be added to Visitors but left in Members.' -ForegroundColor Yellow
 }
